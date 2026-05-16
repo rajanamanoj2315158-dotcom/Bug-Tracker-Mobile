@@ -15,6 +15,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUsage } from "@/context/UsageContext";
 
 const HOLD_MS = 30000;
+const MESSAGE_ROTATE_MS = 6000;
+const MESSAGES = [
+  "Distraction is a decision. Stay locked in.",
+  "Your future self is watching this moment.",
+  "One urge resisted is momentum gained.",
+  "Deep focus now. Rewards later.",
+];
 
 function formatRemaining(ms: number) {
   const safe = Math.max(0, ms);
@@ -30,6 +37,7 @@ export default function StrictModeOverlay() {
     strictModeEnabled,
     activeSession,
     todayDistractionCount,
+    whitelist,
     recordBypassAttempt,
     requestEmergencyUnlock,
     confirmEmergencyUnlock,
@@ -38,6 +46,7 @@ export default function StrictModeOverlay() {
   const [now, setNow] = useState(Date.now());
   const [holding, setHolding] = useState(false);
   const [holdProgress, setHoldProgress] = useState(0);
+  const [messageIndex, setMessageIndex] = useState(0);
   const shake = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(1)).current;
   const holdStartRef = useRef<number | null>(null);
@@ -55,6 +64,13 @@ export default function StrictModeOverlay() {
       ]),
     ).start();
   }, [pulse]);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      setMessageIndex((prev) => (prev + 1) % MESSAGES.length);
+    }, MESSAGE_ROTATE_MS);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     if (!strictModeEnabled) return;
@@ -109,11 +125,25 @@ export default function StrictModeOverlay() {
 
       <Text style={styles.title}>STRICT MODE ACTIVE</Text>
       <Text style={styles.sub}>This session is locked until timer completion.</Text>
+      <Text style={styles.message}>"{MESSAGES[messageIndex]}"</Text>
 
       <View style={styles.stats}>
         <Stat label="Time Left" value={formatRemaining(remaining)} />
         <Stat label="Bypass Attempts" value={String(activeSession.bypassAttempts)} />
         <Stat label="Distractions Today" value={String(todayDistractionCount)} />
+      </View>
+
+      <View style={styles.whitelistWrap}>
+        <Text style={styles.whitelistTitle}>Allowed During Lockdown</Text>
+        <View style={styles.whitelistChips}>
+          {whitelist.slice(0, 8).map((item) => (
+            <View key={item.name} style={styles.whitelistChip}>
+              <Feather name={item.icon as any} size={11} color="#86efac" />
+              <Text style={styles.whitelistChipText}>{item.name}</Text>
+            </View>
+          ))}
+          {whitelist.length === 0 && <Text style={styles.note}>No whitelist apps configured.</Text>}
+        </View>
       </View>
 
       <Text style={styles.note}>
@@ -185,6 +215,7 @@ const styles = StyleSheet.create({
   },
   title: { color: "#fafafa", fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: 0.8 },
   sub: { color: "#a1a1aa", fontSize: 14, fontFamily: "Inter_500Medium", textAlign: "center", marginTop: -16 },
+  message: { color: "#fca5a5", fontSize: 13, fontFamily: "Inter_500Medium", textAlign: "center", marginTop: -18 },
   stats: { width: "100%", gap: 10 },
   statCard: {
     borderWidth: 1,
@@ -200,6 +231,30 @@ const styles = StyleSheet.create({
   statLabel: { color: "#a1a1aa", fontFamily: "Inter_500Medium", fontSize: 13 },
   statValue: { color: "#fef2f2", fontFamily: "Inter_700Bold", fontSize: 15 },
   note: { color: "#71717a", fontSize: 12, fontFamily: "Inter_400Regular", textAlign: "center" },
+  whitelistWrap: {
+    width: "100%",
+    borderWidth: 1,
+    borderColor: "#27272a",
+    backgroundColor: "#0f172a",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  whitelistTitle: { color: "#d4d4d8", fontFamily: "Inter_600SemiBold", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6 },
+  whitelistChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  whitelistChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#14532d",
+    backgroundColor: "#052e16",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  whitelistChipText: { color: "#bbf7d0", fontFamily: "Inter_500Medium", fontSize: 11 },
   footer: { width: "100%" },
   emergencyBtn: {
     borderWidth: 1,

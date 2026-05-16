@@ -81,6 +81,7 @@ const STRICT_SESSION_KEY = "@strict_session_v2";
 const SCHEMA_VERSION = 2;
 const MAX_LOG_ENTRIES = 500;
 const EMERGENCY_COOLDOWN_MS = 30 * 60 * 1000;
+const MANUAL_STRICT_DURATION_MS = 90 * 60 * 1000;
 
 interface UsageContextValue {
   apps: AppEntry[];
@@ -138,11 +139,10 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   const [distractionLog, setDistractionLog] = useState<DistractionAttempt[]>([]);
   const [emergencyUnlock, setEmergencyUnlock] = useState<EmergencyUnlock | null>(null);
   const [lockModeEnabled, setLockModeEnabled] = useState(false);
-  const [strictModeEnabledLegacy, setStrictModeEnabledLegacy] = useState(false);
   const [activeSession, setActiveSession] = useState<StrictModeSession | null>(null);
   const queue = useRef(createWriteQueue());
 
-  const strictModeEnabled = activeSession !== null || strictModeEnabledLegacy;
+  const strictModeEnabled = activeSession !== null;
 
   useEffect(() => {
     (async () => {
@@ -160,14 +160,12 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
         if (s) {
           const p = JSON.parse(s);
           if (p.lockMode !== undefined) setLockModeEnabled(p.lockMode);
-          if (p.strictMode !== undefined) setStrictModeEnabledLegacy(!!p.strictMode);
           if (p.emergencyUnlock) setEmergencyUnlock(p.emergencyUnlock);
         }
         if (rawSession) {
           const session: StrictModeSession = JSON.parse(rawSession);
           if (session.schemaVersion === SCHEMA_VERSION && session.endTime > Date.now()) {
             setActiveSession(session);
-            setStrictModeEnabledLegacy(true);
           } else {
             await AsyncStorage.removeItem(STRICT_SESSION_KEY);
           }
@@ -181,13 +179,11 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
     const ms = activeSession.endTime - Date.now();
     if (ms <= 0) {
       setActiveSession(null);
-      setStrictModeEnabledLegacy(false);
       queue.current.enqueue(() => AsyncStorage.removeItem(STRICT_SESSION_KEY));
       return;
     }
     const t = setTimeout(() => {
       setActiveSession(null);
-      setStrictModeEnabledLegacy(false);
       queue.current.enqueue(() => AsyncStorage.removeItem(STRICT_SESSION_KEY));
     }, ms);
     return () => clearTimeout(t);
@@ -321,14 +317,12 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
       emergencyUnlockUsedAt: null,
     };
     setActiveSession(session);
-    setStrictModeEnabledLegacy(true);
     persistSession(session);
     persistSettings({ lockMode: lockModeEnabled, strictMode: true, emergencyUnlock });
   }, [persistSession, persistSettings, lockModeEnabled, emergencyUnlock]);
 
   const endStrictSession = useCallback(async () => {
     setActiveSession(null);
-    setStrictModeEnabledLegacy(false);
     persistSession(null);
     persistSettings({ lockMode: lockModeEnabled, strictMode: false, emergencyUnlock });
   }, [persistSession, persistSettings, lockModeEnabled, emergencyUnlock]);
@@ -336,9 +330,7 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   const setStrictMode = useCallback((enabled: boolean) => {
     if (enabled) {
       if (!activeSession) {
-        startStrictSession({ durationMs: 24 * 60 * 60 * 1000, mode: "custom" });
-      } else {
-        setStrictModeEnabledLegacy(true);
+        startStrictSession({ durationMs: MANUAL_STRICT_DURATION_MS, mode: "custom", blockedApp: "Manual Strict Mode" });
       }
       persistSettings({ lockMode: lockModeEnabled, strictMode: true, emergencyUnlock });
       return;
@@ -369,7 +361,6 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
     setEmergencyUnlock(unlock);
     persistSettings({ lockMode: lockModeEnabled, strictMode: false, emergencyUnlock: unlock });
     setActiveSession(null);
-    setStrictModeEnabledLegacy(false);
     persistSession(null);
   }, [persistSettings, lockModeEnabled, persistSession]);
 
@@ -380,7 +371,6 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
     setEmergencyUnlock(unlock);
     persistSettings({ lockMode: lockModeEnabled, strictMode: false, emergencyUnlock: unlock });
     setActiveSession(null);
-    setStrictModeEnabledLegacy(false);
     persistSession(null);
     return true;
   }, [requestEmergencyUnlock, persistSettings, lockModeEnabled, persistSession]);

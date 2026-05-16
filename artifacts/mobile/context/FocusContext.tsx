@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { useUsage } from "@/context/UsageContext";
 
 export type SessionMode =
   | "pomodoro"
@@ -54,6 +55,7 @@ export interface ActiveSession {
   mode: SessionMode;
   durationMs: number;
   startedAt: number;
+  endsAt?: number;
   remainingMs: number;
   paused: boolean;
   pomodoroState?: PomodoroState;
@@ -156,6 +158,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [customPresets, setCustomPresets] = useState<CustomPreset[]>(DEFAULT_CUSTOM_PRESETS);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastTickRef = useRef<number>(Date.now());
+  const { startStrictSession, endStrictSession } = useUsage();
 
   useEffect(() => {
     (async () => {
@@ -238,7 +241,9 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
           return { ...prev, remainingMs: prev.remainingMs + delta };
         }
 
-        const remaining = Math.max(0, prev.remainingMs - delta);
+        const remaining = prev.endsAt
+          ? Math.max(0, prev.endsAt - now)
+          : Math.max(0, prev.remainingMs - delta);
 
         if (remaining === 0) {
           stopTick();
@@ -255,12 +260,13 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
               const updated: ActiveSession = {
                 ...prev,
                 remainingMs: isLong ? longMs : shortMs,
+                endsAt: Date.now() + (isLong ? longMs : shortMs),
                 pomodoroState: { cycle: ps.cycle + 1, phase: isLong ? "long_break" : "short_break", completedCycles: newCycles },
               };
               setTimeout(() => startTick(), 100);
               return updated;
             } else {
-              const back: ActiveSession = { ...prev, remainingMs: workMs, pomodoroState: { ...ps, phase: "work" } };
+              const back: ActiveSession = { ...prev, remainingMs: workMs, endsAt: Date.now() + workMs, pomodoroState: { ...ps, phase: "work" } };
               setTimeout(() => startTick(), 100);
               return back;
             }
@@ -274,6 +280,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
             const updated: ActiveSession = {
               ...prev,
               remainingMs: nextMs,
+              endsAt: Date.now() + nextMs,
               pomodoroState: {
                 cycle: (prev.pomodoroState?.cycle ?? 1) + 1,
                 completedCycles: prev.pomodoroState?.completedCycles ?? 0,
@@ -288,6 +295,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
             commitSession(prev, true, allSessions).then((next) => {
               setSessions(next);
               checkAchievements(next, unlockedIds);
+              endStrictSession();
             });
             return allSessions;
           });
@@ -297,7 +305,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, remainingMs: remaining };
       });
     }, 500);
-  }, [stopTick, commitSession, checkAchievements, unlockedIds]);
+  }, [stopTick, commitSession, checkAchievements, unlockedIds, endStrictSession]);
 
   const startSession = useCallback((mode: SessionMode) => {
     stopTick();
@@ -306,14 +314,18 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       mode,
       durationMs,
       startedAt: Date.now(),
+      endsAt: Date.now() + durationMs,
       remainingMs: durationMs,
       paused: false,
       timerMode: mode === "pomodoro" ? "pomodoro" : "countdown",
       pomodoroState: mode === "pomodoro" ? { cycle: 1, phase: "work", completedCycles: 0 } : undefined,
     };
     setCurrentSession(session);
+    if (mode === "deep" || mode === "monk" || mode === "detox" || mode === "founder") {
+      startStrictSession({ durationMs, mode: mode === "deep" ? "deep_work" : "custom", blockedApp: mode });
+    }
     setTimeout(() => startTick(), 50);
-  }, [stopTick, startTick]);
+  }, [stopTick, startTick, startStrictSession]);
 
   const startCustomSession = useCallback((preset: CustomPreset) => {
     stopTick();
@@ -324,6 +336,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       mode: "custom",
       durationMs: workMs,
       startedAt: Date.now(),
+      endsAt: preset.timerMode === "stopwatch" ? undefined : Date.now() + workMs,
       remainingMs: preset.timerMode === "stopwatch" ? 0 : workMs,
       paused: false,
       timerMode: preset.timerMode,
@@ -336,8 +349,11 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       pomodoroState: isPomodoro ? { cycle: 1, phase: "work", completedCycles: 0 } : undefined,
     };
     setCurrentSession(session);
+    if (preset.strictMode) {
+      startStrictSession({ durationMs: workMs, mode: preset.timerMode === "pomodoro" ? "pomodoro" : "custom", blockedApp: preset.name });
+    }
     setTimeout(() => startTick(), 50);
-  }, [stopTick, startTick]);
+  }, [stopTick, startTick, startStrictSession]);
 
   const stopSession = useCallback(() => {
     stopTick();
@@ -347,12 +363,13 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         commitSession(prev, false, allSessions).then((next) => {
           setSessions(next);
           checkAchievements(next, unlockedIds);
+          endStrictSession();
         });
         return allSessions;
       });
       return null;
     });
-  }, [stopTick, commitSession, checkAchievements, unlockedIds]);
+  }, [stopTick, commitSession, checkAchievements, unlockedIds, endStrictSession]);
 
   const pauseSession = useCallback(() => {
     stopTick();
@@ -363,7 +380,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     setCurrentSession((prev) => {
       if (!prev) return prev;
       setTimeout(() => startTick(), 50);
-      return { ...prev, paused: false };
+      return { ...prev, paused: false, endsAt: prev.timerMode === "stopwatch" ? undefined : Date.now() + prev.remainingMs };
     });
   }, [startTick]);
 
@@ -372,7 +389,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       if (!prev?.pomodoroState) return prev;
       if (prev.pomodoroState.phase === "work") return prev;
       const workMs = prev.customWorkMs ?? POMO_WORK_MS;
-      return { ...prev, remainingMs: workMs, pomodoroState: { ...prev.pomodoroState, phase: "work" } };
+      return { ...prev, remainingMs: workMs, endsAt: Date.now() + workMs, pomodoroState: { ...prev.pomodoroState, phase: "work" } };
     });
   }, []);
 

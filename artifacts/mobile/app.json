@@ -3,6 +3,11 @@
     "name": "Focus Shield",
     "slug": "mobile",
     "version": "1.0.0",
+    "description": "Focus Shield is an offline-first native mobile focus app with strict sessions, timer recovery, app-blocking rules, haptics, streaks, and analytics.",
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
@@ -14,9 +19,20 @@
       "backgroundColor": "#011525"
     },
     "ios": {
+      "bundleIdentifier": "com.focusshield.mobile",
       "supportsTablet": false
     },
-    "android": {},
+    "android": {
+      "package": "com.focusshield.mobile",
+      "versionCode": 1,
+      "permissions": [
+        "VIBRATE"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#010f1f"
+      }
+    },
     "web": {
       "favicon": "./assets/images/icon.png",
       "name": "Focus Shield",
