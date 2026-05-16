@@ -1,41 +1,18 @@
-import { BlurView } from "expo-blur";
-import { isLiquidGlassAvailable } from "expo-glass-effect";
-import { Tabs } from "expo-router";
-import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
 import { Feather } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { Tabs } from "expo-router";
 import React from "react";
-import { Platform, StyleSheet, View, useColorScheme } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 
-function NativeTabLayout() {
-  return (
-    <NativeTabs>
-      <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: "shield", selected: "shield.fill" }} />
-        <Label>Focus</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="apps">
-        <Icon sf={{ default: "app.badge", selected: "app.badge.fill" }} />
-        <Label>Apps</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="stats">
-        <Icon sf={{ default: "chart.bar", selected: "chart.bar.fill" }} />
-        <Label>Stats</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="settings">
-        <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
-        <Label>Settings</Label>
-      </NativeTabs.Trigger>
-    </NativeTabs>
-  );
-}
-
-function ClassicTabLayout() {
+export default function TabLayout() {
   const colors = useColors();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
+  const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
+
+  const tabBarHeight = isWeb ? 88 : 56 + (isIOS ? insets.bottom : 0);
 
   return (
     <Tabs
@@ -45,75 +22,63 @@ function ClassicTabLayout() {
         tabBarInactiveTintColor: colors.mutedForeground,
         tabBarStyle: {
           position: "absolute",
-          backgroundColor: isIOS ? "transparent" : colors.surface,
+          backgroundColor: isIOS ? "transparent" : colors.surface + "F0",
           borderTopWidth: 1,
           borderTopColor: colors.border,
           elevation: 0,
-          height: isWeb ? 84 : 60,
-          paddingBottom: isWeb ? 34 : 8,
+          height: tabBarHeight,
+          paddingBottom: isWeb ? 34 : isIOS ? insets.bottom : 6,
           paddingTop: 8,
         },
         tabBarBackground: () =>
           isIOS ? (
-            <BlurView
-              intensity={80}
-              tint="dark"
-              style={StyleSheet.absoluteFill}
-            />
+            <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
           ) : (
-            <View
-              style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]}
-            />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface + "F5" }]} />
           ),
         tabBarLabelStyle: {
           fontFamily: "Inter_500Medium",
           fontSize: 10,
+          marginTop: -2,
         },
+        tabBarIconStyle: { marginTop: 2 },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Focus",
-          tabBarIcon: ({ color }) => (
-            <Feather name="shield" size={22} color={color} />
-          ),
+          title: "Home",
+          tabBarIcon: ({ color }) => <Feather name="home" size={21} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="apps"
+        name="focus"
         options={{
-          title: "Apps",
-          tabBarIcon: ({ color }) => (
-            <Feather name="grid" size={22} color={color} />
-          ),
+          title: "Focus",
+          tabBarIcon: ({ color }) => <Feather name="target" size={21} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="block"
+        options={{
+          title: "Block",
+          tabBarIcon: ({ color }) => <Feather name="shield" size={21} color={color} />,
         }}
       />
       <Tabs.Screen
         name="stats"
         options={{
           title: "Stats",
-          tabBarIcon: ({ color }) => (
-            <Feather name="bar-chart-2" size={22} color={color} />
-          ),
+          tabBarIcon: ({ color }) => <Feather name="bar-chart-2" size={21} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="settings"
+        name="more"
         options={{
-          title: "Settings",
-          tabBarIcon: ({ color }) => (
-            <Feather name="settings" size={22} color={color} />
-          ),
+          title: "More",
+          tabBarIcon: ({ color }) => <Feather name="grid" size={21} color={color} />,
         }}
       />
     </Tabs>
   );
-}
-
-export default function TabLayout() {
-  if (isLiquidGlassAvailable()) {
-    return <NativeTabLayout />;
-  }
-  return <ClassicTabLayout />;
 }

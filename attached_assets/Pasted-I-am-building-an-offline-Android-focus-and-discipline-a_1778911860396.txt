@@ -1,0 +1,80 @@
+I am building an offline Android focus and discipline app inspired by Stay Focused App, but with a much stricter and psychologically stronger locking system.
+
+Main concept:
+When Strict Mode is activated, all blocked apps remain blocked at all times — whether the user is currently using the phone or not.
+
+The user can only access apps that were manually added to a whitelist before starting Strict Mode.
+
+Strict Mode behavior:
+
+Only whitelist apps can be opened
+All other apps are completely blocked
+Block screen cannot be skipped
+Back button should not bypass the block screen
+Recent apps button should not bypass protection
+Pause button becomes invisible in Strict Mode
+No temporary unlock option
+User cannot disable the session easily
+Strong anti-cheat logic
+App should immediately reopen block screen if blocked app is attempted
+Optional cooldown before changing settings
+Strict lock remains active until timer/session ends
+
+Whitelist system:
+
+User selects allowed apps before entering Strict Mode
+Examples:
+Phone
+Messages
+Calculator
+Notes
+PDF Reader
+Coding app
+Only these selected apps can open during the session
+
+Focus session flow:
+
+User selects session duration
+User selects whitelist apps
+User activates Strict Mode
+App enters lockdown state
+Only whitelist apps remain accessible
+All distractions stay blocked until timer completes
+
+Advanced logic:
+
+Detect app launches using Accessibility Service
+Overlay block screen on restricted apps
+Auto-return user to home screen if bypass attempted
+Disable easy escape methods
+Prevent rapid app switching
+Track distraction attempts locally
+Reward successful focus sessions
+Store all data offline
+
+UI design:
+
+Minimal black premium UI
+Calm but strict design language
+Large focus timer
+Deep work aesthetic
+No distracting animations
+Professional founder/student feel
+
+Generate:
+
+Full Android architecture
+Accessibility Service logic
+App blocking workflow
+Strict Mode protection logic
+Whitelist system design
+Offline storage structure
+Anti-bypass mechanisms
+Focus session lifecycle
+Battery optimization techniques
+Beginner-friendly implementation roadmap
+Features better than Stay Focused
+Psychological discipline mechanics
+Gamification without addiction
+Minimal premium UI ideas
+Complete app flow from startup to focus completion

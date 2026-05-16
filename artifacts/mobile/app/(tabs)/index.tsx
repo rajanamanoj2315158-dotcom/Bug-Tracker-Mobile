@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useRef, useState } from "react";
+import { router } from "expo-router";
+import React, { useEffect, useRef } from "react";
 import {
   Animated,
   Platform,
@@ -12,24 +13,20 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { SessionMode, useFocus } from "@/context/FocusContext";
+import { useFocus } from "@/context/FocusContext";
+import { useHabits } from "@/context/HabitContext";
+import { useUsage } from "@/context/UsageContext";
 
-const MODES: { key: SessionMode; label: string; minutes: number; desc: string }[] = [
-  { key: "study", label: "Study", minutes: 25, desc: "Pomodoro · 25 min" },
-  { key: "focus", label: "Focus", minutes: 45, desc: "Deep Focus · 45 min" },
-  { key: "deep", label: "Deep Work", minutes: 90, desc: "Marathon · 90 min" },
+const QUOTES = [
+  "The secret of getting ahead is getting started.",
+  "Discipline is the bridge between goals and accomplishment.",
+  "Focus on being productive instead of busy.",
+  "Small disciplines repeated with consistency lead to great achievements.",
+  "Your future is created by what you do today, not tomorrow.",
+  "The successful warrior is the average man with laser-like focus.",
+  "It's not about having time. It's about making time.",
+  "Deep work is the superpower of the 21st century.",
 ];
-
-function formatTime(ms: number) {
-  const total = Math.ceil(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
 
 function formatMs(ms: number) {
   const h = Math.floor(ms / 3600000);
@@ -39,409 +36,303 @@ function formatMs(ms: number) {
   return "< 1m";
 }
 
-function PulseRing({ active, color }: { active: boolean; color: string }) {
-  const pulse = useRef(new Animated.Value(1)).current;
-  const opacity = useRef(new Animated.Value(0.6)).current;
+function ScoreRing({
+  score,
+  size = 120,
+  strokeWidth = 10,
+}: {
+  score: number;
+  size?: number;
+  strokeWidth?: number;
+}) {
+  const colors = useColors();
+  const animVal = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (!active) {
-      pulse.setValue(1);
-      opacity.setValue(0);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.parallel([
-        Animated.sequence([
-          Animated.timing(pulse, { toValue: 1.18, duration: 1200, useNativeDriver: true }),
-          Animated.timing(pulse, { toValue: 1, duration: 1200, useNativeDriver: true }),
-        ]),
-        Animated.sequence([
-          Animated.timing(opacity, { toValue: 0.3, duration: 1200, useNativeDriver: true }),
-          Animated.timing(opacity, { toValue: 0.6, duration: 1200, useNativeDriver: true }),
-        ]),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [active]);
+    Animated.timing(animVal, {
+      toValue: score,
+      duration: 1000,
+      useNativeDriver: false,
+    }).start();
+  }, [score]);
 
-  if (!active) return null;
+  const r = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * r;
+  const cx = size / 2;
+  const cy = size / 2;
+
+  const getColor = (s: number) => {
+    if (s >= 80) return colors.success;
+    if (s >= 50) return colors.primary;
+    if (s >= 25) return colors.warning;
+    return colors.destructive;
+  };
+
   return (
-    <Animated.View
-      style={[
-        StyleSheet.absoluteFill,
-        {
-          borderRadius: 999,
-          borderWidth: 2,
-          borderColor: color,
-          transform: [{ scale: pulse }],
-          opacity,
-        },
-      ]}
-    />
+    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+      <View
+        style={{
+          position: "absolute",
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          borderWidth: strokeWidth,
+          borderColor: colors.border,
+        }}
+      />
+      <View
+        style={{
+          position: "absolute",
+          width: size - strokeWidth * 2,
+          height: (size - strokeWidth * 2) * (score / 100),
+          bottom: strokeWidth,
+          borderRadius: size / 2,
+          backgroundColor: getColor(score) + "18",
+          overflow: "hidden",
+        }}
+      />
+      <View style={{ alignItems: "center" }}>
+        <Text
+          style={{
+            fontFamily: "Inter_700Bold",
+            fontSize: 32,
+            color: getColor(score),
+            letterSpacing: -1,
+          }}
+        >
+          {score}
+        </Text>
+        <Text style={{ fontFamily: "Inter_500Medium", fontSize: 11, color: colors.mutedForeground }}>
+          SCORE
+        </Text>
+      </View>
+      <View
+        style={{
+          position: "absolute",
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          borderWidth: strokeWidth,
+          borderColor: "transparent",
+          borderTopColor: getColor(score),
+          transform: [{ rotate: `${(score / 100) * 360 - 90}deg` }],
+        }}
+      />
+    </View>
   );
 }
+
+const MODE_INFO = {
+  pomodoro: { label: "Pomodoro", icon: "clock", color: "#f59e0b", desc: "25 min work cycles" },
+  deep: { label: "Deep Work", icon: "anchor", color: "#6366f1", desc: "90 min deep focus" },
+  monk: { label: "Monk Mode", icon: "moon", color: "#8b5cf6", desc: "3h total silence" },
+};
 
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { currentSession, startSession, stopSession, pauseSession, resumeSession, todayFocusMs, streak, blockedApps } = useFocus();
-  const [selectedMode, setSelectedMode] = useState<SessionMode>("study");
-  const [customMinutes, setCustomMinutes] = useState(30);
+  const { productivityScore, streak, todayFocusMs, currentSession, level, achievements, startSession } = useFocus();
+  const { completedHabitsToday, todayHabits, toggleHabitToday } = useHabits();
+  const { blockedApps } = useUsage();
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
-  const bottomPad = Platform.OS === "web" ? 34 : 0;
-
-  const isActive = !!currentSession;
-  const isPaused = currentSession?.paused ?? false;
-  const progress = currentSession
-    ? 1 - currentSession.remainingMs / currentSession.durationMs
-    : 0;
-
-  function handleStart() {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const mode = MODES.find((m) => m.key === selectedMode)!;
-    startSession(selectedMode, mode.minutes * 60 * 1000);
-  }
-
-  function handleStop() {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    stopSession();
-  }
-
-  function handlePauseResume() {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (isPaused) resumeSession();
-    else pauseSession();
-  }
+  const quote = QUOTES[new Date().getDay() % QUOTES.length];
+  const unlockedCount = achievements.filter((a) => a.unlockedAt).length;
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return "Good morning";
+    if (h < 17) return "Good afternoon";
+    return "Good evening";
+  })();
 
   const styles = makeStyles(colors);
 
   return (
     <ScrollView
-      style={[styles.container]}
-      contentContainerStyle={{ paddingTop: topPad + 20, paddingBottom: bottomPad + 100 }}
+      style={styles.container}
+      contentContainerStyle={{ paddingTop: topPad + 16, paddingBottom: 110 }}
       showsVerticalScrollIndicator={false}
     >
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.shieldIcon}>
-          <Feather name="shield" size={18} color={colors.primary} />
+        <View>
+          <Text style={styles.greeting}>{greeting}</Text>
+          <Text style={styles.headerTitle}>Focus Shield</Text>
         </View>
-        <Text style={styles.headerTitle}>Focus Shield</Text>
-      </View>
-
-      {/* Quick Stats */}
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{formatMs(todayFocusMs)}</Text>
-          <Text style={styles.statLabel}>Today</Text>
-        </View>
-        <View style={[styles.statCard, styles.statCardCenter]}>
-          <Text style={styles.statValue}>{streak}</Text>
-          <Text style={styles.statLabel}>Day Streak</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{blockedApps.length}</Text>
-          <Text style={styles.statLabel}>Blocked</Text>
+        <View style={styles.levelBadge}>
+          <Text style={styles.levelText}>LV{level}</Text>
         </View>
       </View>
 
-      {/* Timer Circle */}
-      <View style={styles.timerSection}>
-        <View style={styles.timerOuter}>
-          <PulseRing active={isActive && !isPaused} color={colors.primary} />
-          <View style={[styles.timerCircle, isActive && styles.timerCircleActive]}>
-            {isActive ? (
-              <>
-                <Text style={styles.timerTime}>
-                  {formatTime(currentSession!.remainingMs)}
-                </Text>
-                <Text style={styles.timerMode}>
-                  {MODES.find((m) => m.key === currentSession!.mode)?.label ?? "Session"}
-                </Text>
-                {isPaused && (
-                  <View style={styles.pausedBadge}>
-                    <Text style={styles.pausedText}>PAUSED</Text>
-                  </View>
-                )}
-              </>
-            ) : (
-              <>
-                <Feather name="shield" size={40} color={colors.primary} />
-                <Text style={styles.timerIdleText}>Ready</Text>
-              </>
-            )}
+      {/* Active Session Banner */}
+      {currentSession && (
+        <Pressable
+          style={({ pressed }) => [styles.activeBanner, pressed && { opacity: 0.85 }]}
+          onPress={() => router.push("/focus")}
+        >
+          <View style={styles.activeDot} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.activeBannerTitle}>Session in Progress</Text>
+            <Text style={styles.activeBannerSub}>
+              {currentSession.paused ? "Paused · " : ""}
+              {Math.ceil(currentSession.remainingMs / 60000)}m remaining
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.primary} />
+        </Pressable>
+      )}
+
+      {/* Score + Stats */}
+      <View style={styles.scoreSection}>
+        <ScoreRing score={productivityScore} size={130} strokeWidth={10} />
+        <View style={styles.scoreSide}>
+          <View style={styles.scoreStatRow}>
+            <Feather name="zap" size={14} color={colors.warning} />
+            <Text style={styles.scoreStatValue}>{streak}</Text>
+            <Text style={styles.scoreStatLabel}>day streak</Text>
+          </View>
+          <View style={styles.scoreStatRow}>
+            <Feather name="clock" size={14} color={colors.primary} />
+            <Text style={styles.scoreStatValue}>{formatMs(todayFocusMs)}</Text>
+            <Text style={styles.scoreStatLabel}>focused today</Text>
+          </View>
+          <View style={styles.scoreStatRow}>
+            <Feather name="shield" size={14} color={colors.success} />
+            <Text style={styles.scoreStatValue}>{blockedApps.length}</Text>
+            <Text style={styles.scoreStatLabel}>apps blocked</Text>
+          </View>
+          <View style={styles.scoreStatRow}>
+            <Feather name="award" size={14} color={colors.accent} />
+            <Text style={styles.scoreStatValue}>{unlockedCount}</Text>
+            <Text style={styles.scoreStatLabel}>achievements</Text>
           </View>
         </View>
       </View>
 
-      {/* Session Controls */}
-      {isActive ? (
-        <View style={styles.controls}>
-          <Pressable
-            style={({ pressed }) => [styles.controlBtn, styles.controlBtnSecondary, pressed && { opacity: 0.7 }]}
-            onPress={handleStop}
-          >
-            <Feather name="square" size={18} color={colors.destructive} />
-            <Text style={[styles.controlBtnText, { color: colors.destructive }]}>Stop</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.controlBtn, styles.controlBtnPrimary, pressed && { opacity: 0.8 }]}
-            onPress={handlePauseResume}
-          >
-            <Feather name={isPaused ? "play" : "pause"} size={18} color={colors.primaryForeground} />
-            <Text style={[styles.controlBtnText, { color: colors.primaryForeground }]}>
-              {isPaused ? "Resume" : "Pause"}
-            </Text>
-          </Pressable>
+      {/* Quick Launch */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Quick Launch</Text>
+        <View style={styles.modeRow}>
+          {(Object.entries(MODE_INFO) as [keyof typeof MODE_INFO, typeof MODE_INFO[keyof typeof MODE_INFO]][]).map(([key, info]) => (
+            <Pressable
+              key={key}
+              style={({ pressed }) => [styles.modeQuickCard, pressed && { opacity: 0.75, transform: [{ scale: 0.96 }] }]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                startSession(key);
+                router.push("/focus");
+              }}
+            >
+              <View style={[styles.modeQuickIcon, { backgroundColor: info.color + "22" }]}>
+                <Feather name={info.icon as any} size={18} color={info.color} />
+              </View>
+              <Text style={styles.modeQuickLabel}>{info.label}</Text>
+              <Text style={styles.modeQuickDesc}>{info.desc}</Text>
+            </Pressable>
+          ))}
         </View>
-      ) : (
-        <>
-          {/* Mode Selection */}
-          <View style={styles.modeSection}>
-            <Text style={styles.sectionTitle}>Session Mode</Text>
-            <View style={styles.modeGrid}>
-              {MODES.map((m) => (
+      </View>
+
+      {/* Today's Habits */}
+      {todayHabits.length > 0 && (
+        <View style={styles.section}>
+          <View style={styles.sectionRow}>
+            <Text style={styles.sectionTitle}>Today's Habits</Text>
+            <Text style={styles.sectionCount}>
+              {completedHabitsToday}/{todayHabits.length}
+            </Text>
+          </View>
+          <View style={styles.card}>
+            {todayHabits.slice(0, 4).map(({ habit, completed }, idx) => (
+              <React.Fragment key={habit.id}>
+                {idx > 0 && <View style={styles.rowDivider} />}
                 <Pressable
-                  key={m.key}
-                  style={({ pressed }) => [
-                    styles.modeCard,
-                    selectedMode === m.key && styles.modeCardActive,
-                    pressed && { opacity: 0.75 },
-                  ]}
+                  style={({ pressed }) => [styles.habitRow, pressed && { opacity: 0.7 }]}
                   onPress={() => {
                     Haptics.selectionAsync();
-                    setSelectedMode(m.key);
+                    toggleHabitToday(habit.id);
                   }}
                 >
-                  <Text style={[styles.modeLabel, selectedMode === m.key && styles.modeLabelActive]}>
-                    {m.label}
+                  <View style={[styles.habitCheck, completed && styles.habitCheckDone]}>
+                    {completed && <Feather name="check" size={12} color={colors.primaryForeground} />}
+                  </View>
+                  <Text style={[styles.habitName, completed && styles.habitNameDone]}>
+                    {habit.name}
                   </Text>
-                  <Text style={[styles.modeDesc, selectedMode === m.key && styles.modeDescActive]}>
-                    {m.desc}
-                  </Text>
+                  <Feather name={habit.icon as any} size={14} color={completed ? colors.success : colors.mutedForeground} />
                 </Pressable>
-              ))}
-            </View>
+              </React.Fragment>
+            ))}
           </View>
-
-          {/* Start Button */}
-          <Pressable
-            style={({ pressed }) => [styles.startBtn, pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] }]}
-            onPress={handleStart}
-          >
-            <Feather name="play" size={20} color={colors.primaryForeground} />
-            <Text style={styles.startBtnText}>Start Session</Text>
-          </Pressable>
-        </>
+        </View>
       )}
+
+      {/* Quote */}
+      <View style={styles.quoteCard}>
+        <Feather name="message-circle" size={14} color={colors.primary} style={{ marginBottom: 6 }} />
+        <Text style={styles.quoteText}>"{quote}"</Text>
+      </View>
+
+      {/* Achievements preview */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Achievements</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 0 }}>
+          {achievements.slice(0, 8).map((a) => (
+            <View key={a.id} style={[styles.achievementCard, !a.unlockedAt && styles.achievementCardLocked]}>
+              <View style={[styles.achievementIcon, a.unlockedAt ? styles.achievementIconUnlocked : styles.achievementIconLocked]}>
+                <Feather name={a.icon as any} size={18} color={a.unlockedAt ? colors.primary : colors.mutedForeground} />
+              </View>
+              <Text style={[styles.achievementTitle, !a.unlockedAt && { color: colors.mutedForeground }]} numberOfLines={2}>
+                {a.title}
+              </Text>
+            </View>
+          ))}
+        </ScrollView>
+      </View>
     </ScrollView>
   );
 }
 
-function makeStyles(colors: ReturnType<typeof useColors>) {
+function makeStyles(c: ReturnType<typeof useColors>) {
   return StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    header: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      paddingHorizontal: 24,
-      marginBottom: 24,
-    },
-    shieldIcon: {
-      width: 32,
-      height: 32,
-      borderRadius: 8,
-      backgroundColor: colors.card,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    headerTitle: {
-      fontFamily: "Inter_700Bold",
-      fontSize: 22,
-      color: colors.foreground,
-      letterSpacing: -0.5,
-    },
-    statsRow: {
-      flexDirection: "row",
-      paddingHorizontal: 20,
-      gap: 10,
-      marginBottom: 32,
-    },
-    statCard: {
-      flex: 1,
-      backgroundColor: colors.card,
-      borderRadius: colors.radius,
-      padding: 14,
-      borderWidth: 1,
-      borderColor: colors.border,
-      alignItems: "center",
-    },
-    statCardCenter: {
-      borderColor: colors.primary + "55",
-    },
-    statValue: {
-      fontFamily: "Inter_700Bold",
-      fontSize: 20,
-      color: colors.foreground,
-      letterSpacing: -0.5,
-    },
-    statLabel: {
-      fontFamily: "Inter_400Regular",
-      fontSize: 11,
-      color: colors.mutedForeground,
-      marginTop: 2,
-    },
-    timerSection: {
-      alignItems: "center",
-      marginBottom: 40,
-    },
-    timerOuter: {
-      width: 220,
-      height: 220,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    timerCircle: {
-      width: 200,
-      height: 200,
-      borderRadius: 100,
-      backgroundColor: colors.card,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 2,
-      borderColor: colors.border,
-      gap: 4,
-    },
-    timerCircleActive: {
-      borderColor: colors.primary,
-      backgroundColor: colors.surface,
-    },
-    timerTime: {
-      fontFamily: "Inter_700Bold",
-      fontSize: 48,
-      color: colors.foreground,
-      letterSpacing: -2,
-    },
-    timerMode: {
-      fontFamily: "Inter_500Medium",
-      fontSize: 13,
-      color: colors.primary,
-    },
-    timerIdleText: {
-      fontFamily: "Inter_500Medium",
-      fontSize: 16,
-      color: colors.mutedForeground,
-      marginTop: 8,
-    },
-    pausedBadge: {
-      backgroundColor: colors.warning + "22",
-      borderRadius: 6,
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      marginTop: 6,
-    },
-    pausedText: {
-      fontFamily: "Inter_600SemiBold",
-      fontSize: 10,
-      color: colors.warning,
-      letterSpacing: 1,
-    },
-    controls: {
-      flexDirection: "row",
-      paddingHorizontal: 24,
-      gap: 12,
-    },
-    controlBtn: {
-      flex: 1,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 8,
-      paddingVertical: 16,
-      borderRadius: colors.radius,
-      borderWidth: 1,
-    },
-    controlBtnPrimary: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
-      flex: 2,
-    },
-    controlBtnSecondary: {
-      backgroundColor: colors.card,
-      borderColor: colors.destructive + "55",
-    },
-    controlBtnText: {
-      fontFamily: "Inter_600SemiBold",
-      fontSize: 15,
-    },
-    modeSection: {
-      paddingHorizontal: 24,
-      marginBottom: 24,
-    },
-    sectionTitle: {
-      fontFamily: "Inter_600SemiBold",
-      fontSize: 13,
-      color: colors.mutedForeground,
-      letterSpacing: 0.5,
-      textTransform: "uppercase",
-      marginBottom: 12,
-    },
-    modeGrid: {
-      flexDirection: "row",
-      gap: 10,
-    },
-    modeCard: {
-      flex: 1,
-      backgroundColor: colors.card,
-      borderRadius: colors.radius,
-      padding: 14,
-      borderWidth: 1,
-      borderColor: colors.border,
-      gap: 4,
-    },
-    modeCardActive: {
-      backgroundColor: colors.primary + "18",
-      borderColor: colors.primary,
-    },
-    modeLabel: {
-      fontFamily: "Inter_600SemiBold",
-      fontSize: 13,
-      color: colors.foreground,
-    },
-    modeLabelActive: {
-      color: colors.primary,
-    },
-    modeDesc: {
-      fontFamily: "Inter_400Regular",
-      fontSize: 11,
-      color: colors.mutedForeground,
-    },
-    modeDescActive: {
-      color: colors.primary + "aa",
-    },
-    startBtn: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 10,
-      marginHorizontal: 24,
-      paddingVertical: 18,
-      borderRadius: colors.radius,
-      backgroundColor: colors.primary,
-    },
-    startBtnText: {
-      fontFamily: "Inter_700Bold",
-      fontSize: 16,
-      color: colors.primaryForeground,
-      letterSpacing: -0.3,
-    },
+    container: { flex: 1, backgroundColor: c.background },
+    header: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", paddingHorizontal: 24, marginBottom: 16 },
+    greeting: { fontFamily: "Inter_400Regular", fontSize: 13, color: c.mutedForeground, marginBottom: 2 },
+    headerTitle: { fontFamily: "Inter_700Bold", fontSize: 24, color: c.foreground, letterSpacing: -0.6 },
+    levelBadge: { backgroundColor: c.primary + "22", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: c.primary + "55" },
+    levelText: { fontFamily: "Inter_700Bold", fontSize: 13, color: c.primary },
+    activeBanner: { flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: 20, marginBottom: 16, backgroundColor: c.primary + "18", borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.primary + "44" },
+    activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: c.primary },
+    activeBannerTitle: { fontFamily: "Inter_600SemiBold", fontSize: 14, color: c.foreground },
+    activeBannerSub: { fontFamily: "Inter_400Regular", fontSize: 12, color: c.mutedForeground, marginTop: 1 },
+    scoreSection: { flexDirection: "row", alignItems: "center", paddingHorizontal: 24, gap: 24, marginBottom: 28 },
+    scoreSide: { flex: 1, gap: 12 },
+    scoreStatRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+    scoreStatValue: { fontFamily: "Inter_700Bold", fontSize: 15, color: c.foreground },
+    scoreStatLabel: { fontFamily: "Inter_400Regular", fontSize: 12, color: c.mutedForeground },
+    section: { paddingHorizontal: 20, marginBottom: 20 },
+    sectionTitle: { fontFamily: "Inter_600SemiBold", fontSize: 12, color: c.mutedForeground, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 10 },
+    sectionRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+    sectionCount: { fontFamily: "Inter_600SemiBold", fontSize: 13, color: c.primary },
+    modeRow: { flexDirection: "row", gap: 10 },
+    modeQuickCard: { flex: 1, backgroundColor: c.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.border, gap: 6 },
+    modeQuickIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", marginBottom: 2 },
+    modeQuickLabel: { fontFamily: "Inter_600SemiBold", fontSize: 13, color: c.foreground },
+    modeQuickDesc: { fontFamily: "Inter_400Regular", fontSize: 11, color: c.mutedForeground },
+    card: { backgroundColor: c.card, borderRadius: 14, borderWidth: 1, borderColor: c.border, overflow: "hidden" },
+    habitRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
+    habitCheck: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: c.border, alignItems: "center", justifyContent: "center" },
+    habitCheckDone: { backgroundColor: c.success, borderColor: c.success },
+    habitName: { flex: 1, fontFamily: "Inter_500Medium", fontSize: 14, color: c.foreground },
+    habitNameDone: { color: c.mutedForeground, textDecorationLine: "line-through" },
+    rowDivider: { height: 1, backgroundColor: c.border, marginLeft: 50 },
+    quoteCard: { marginHorizontal: 20, marginBottom: 20, backgroundColor: c.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: c.border, borderLeftWidth: 3, borderLeftColor: c.primary },
+    quoteText: { fontFamily: "Inter_400Regular", fontSize: 13, color: c.mutedForeground, lineHeight: 20, fontStyle: "italic" },
+    achievementCard: { width: 90, backgroundColor: c.card, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: c.border, alignItems: "center", gap: 8 },
+    achievementCardLocked: { opacity: 0.5 },
+    achievementIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
+    achievementIconUnlocked: { backgroundColor: c.primary + "22" },
+    achievementIconLocked: { backgroundColor: c.border },
+    achievementTitle: { fontFamily: "Inter_500Medium", fontSize: 11, color: c.foreground, textAlign: "center", lineHeight: 14 },
   });
 }
