@@ -18,7 +18,13 @@
     },
     "android": {},
     "web": {
-      "favicon": "./assets/images/icon.png"
+      "favicon": "./assets/images/icon.png",
+      "name": "Focus Shield",
+      "shortName": "Focus Shield",
+      "description": "Focus Shield is an offline Android productivity app with a custom timer, Pomodoro cycles, app blocking, Shorts & Reels blocking, streaks, and analytics to help you build deep focus habits.",
+      "lang": "en",
+      "themeColor": "#010f1f",
+      "backgroundColor": "#010f1f"
     },
     "plugins": [
       [
