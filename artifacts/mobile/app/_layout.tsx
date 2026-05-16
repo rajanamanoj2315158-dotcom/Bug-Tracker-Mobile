@@ -15,6 +15,7 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import StrictModeOverlay from "@/components/StrictModeOverlay";
 import { FocusProvider } from "@/context/FocusContext";
 import { HabitProvider } from "@/context/HabitContext";
 import { UsageProvider } from "@/context/UsageContext";
@@ -66,6 +67,7 @@ export default function RootLayout() {
                 <HabitProvider>
                   <FocusProvider>
                     <RootLayoutNav />
+                    <StrictModeOverlay />
                   </FocusProvider>
                 </HabitProvider>
               </UsageProvider>

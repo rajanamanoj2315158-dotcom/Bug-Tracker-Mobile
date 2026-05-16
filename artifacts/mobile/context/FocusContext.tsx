@@ -207,7 +207,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     const elapsed = session.durationMs - session.remainingMs;
     if (elapsed < 10000 && !completed) return allSessions;
     const record: SessionRecord = {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       mode: session.mode,
       durationMs: session.durationMs,
       completedMs: completed ? session.durationMs : elapsed,
@@ -243,7 +243,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         if (remaining === 0) {
           stopTick();
 
-          if (prev.pomodoroState) {
+          if (prev.pomodoroState && prev.timerMode === "pomodoro") {
             const ps = prev.pomodoroState;
             const workMs = prev.customWorkMs ?? POMO_WORK_MS;
             const shortMs = prev.customBreakMs ?? POMO_SHORT_MS;
@@ -268,9 +268,18 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
 
           // Interval mode: work → break loop
           if (prev.timerMode === "interval" && prev.customBreakMs) {
-            const isWork = prev.customPresetId?.includes("_work") !== true;
+            const phase = prev.pomodoroState?.phase ?? "work";
+            const isWork = phase === "work";
             const nextMs = isWork ? prev.customBreakMs : (prev.customWorkMs ?? POMO_WORK_MS);
-            const updated: ActiveSession = { ...prev, remainingMs: nextMs };
+            const updated: ActiveSession = {
+              ...prev,
+              remainingMs: nextMs,
+              pomodoroState: {
+                cycle: (prev.pomodoroState?.cycle ?? 1) + 1,
+                completedCycles: prev.pomodoroState?.completedCycles ?? 0,
+                phase: isWork ? "short_break" : "work",
+              },
+            };
             setTimeout(() => startTick(), 100);
             return updated;
           }
@@ -419,7 +428,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       if (i === 0) { cur = 1; continue; }
       const prev = new Date(sorted[i - 1]).getTime() + 86400000;
       const curr = new Date(sorted[i]).getTime();
-      if (Math.abs(prev - curr) < 86400000) cur++;
+      if (Math.abs(prev - curr) <= 1) cur++;
       else cur = 1;
       best = Math.max(best, cur);
     }
