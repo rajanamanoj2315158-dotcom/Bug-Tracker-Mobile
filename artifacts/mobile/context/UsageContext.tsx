@@ -9,28 +9,62 @@ import React, {
 
 export type AppCategory = "social" | "entertainment" | "productive" | "gaming" | "communication" | "news" | "other";
 
+export type BlockTrigger =
+  | "always"
+  | "scheduled"
+  | "study_mode"
+  | "deep_work"
+  | "monk_mode"
+  | "detox_mode"
+  | "sleep_hours"
+  | "usage_limit"
+  | "exam_mode"
+  | "weekdays_only"
+  | "weekends_only"
+  | "alternate_days";
+
+export const TRIGGER_META: Record<BlockTrigger, { label: string; icon: string; color: string; desc: string }> = {
+  always:       { label: "Always",          icon: "slash",       color: "#ef4444", desc: "Block at all times" },
+  scheduled:    { label: "Scheduled",       icon: "clock",       color: "#38bdf8", desc: "Block between set times" },
+  study_mode:   { label: "Study Mode",      icon: "book-open",   color: "#f59e0b", desc: "Block during study sessions" },
+  deep_work:    { label: "Deep Work",       icon: "anchor",      color: "#6366f1", desc: "Block during deep work sessions" },
+  monk_mode:    { label: "Monk Mode",       icon: "moon",        color: "#8b5cf6", desc: "Block during monk mode sessions" },
+  detox_mode:   { label: "Detox Mode",      icon: "x-circle",   color: "#ec4899", desc: "Block during dopamine detox" },
+  sleep_hours:  { label: "Sleep Hours",     icon: "moon",        color: "#818cf8", desc: "Block between your sleep times" },
+  usage_limit:  { label: "Usage Limit",     icon: "activity",   color: "#f97316", desc: "Block after daily limit exceeded" },
+  exam_mode:    { label: "Exam Mode",       icon: "alert-circle",color: "#ef4444", desc: "Block during exam sessions" },
+  weekdays_only:{ label: "Weekdays Only",   icon: "briefcase",  color: "#22c55e", desc: "Mon–Fri blocking" },
+  weekends_only:{ label: "Weekends Only",   icon: "coffee",     color: "#a855f7", desc: "Sat–Sun blocking" },
+  alternate_days:{ label: "Alternate Days", icon: "repeat",     color: "#64748b", desc: "Every other day" },
+};
+
+export interface AppBlockConfig {
+  triggers: BlockTrigger[];
+  startTime: string;
+  endTime: string;
+  days: number[];
+  dailyLimitMin: number;
+  emergencyAllowed: boolean;
+  permanent: boolean;
+}
+
 export interface AppEntry {
   name: string;
   category: AppCategory;
   blocked: boolean;
-  dailyLimitMin?: number;
+  blockConfig: AppBlockConfig;
 }
 
 export interface BlockRule {
   id: string;
-  type: "app" | "website" | "keyword";
+  type: "website" | "keyword";
   value: string;
   enabled: boolean;
-  scheduleDays?: number[];
-  scheduleStartTime?: string;
-  scheduleEndTime?: string;
 }
 
-export interface UsageLog {
-  date: string;
-  appName: string;
-  minutesUsed: number;
-  category: AppCategory;
+export interface WhitelistEntry {
+  name: string;
+  icon: string;
 }
 
 export interface TimetableSlot {
@@ -47,24 +81,40 @@ export interface EmergencyUnlock {
   cooldownMs: number;
 }
 
+export interface DistractionAttempt {
+  appName: string;
+  attemptedAt: number;
+  sessionMode?: string;
+}
+
+const DEFAULT_BLOCK_CONFIG = (): AppBlockConfig => ({
+  triggers: [],
+  startTime: "09:00",
+  endTime: "22:00",
+  days: [1, 2, 3, 4, 5],
+  dailyLimitMin: 30,
+  emergencyAllowed: false,
+  permanent: false,
+});
+
 const DEFAULT_APPS: AppEntry[] = [
-  { name: "Instagram", category: "social", blocked: true },
-  { name: "TikTok", category: "social", blocked: true },
-  { name: "YouTube", category: "entertainment", blocked: false, dailyLimitMin: 30 },
-  { name: "Twitter / X", category: "social", blocked: true },
-  { name: "Reddit", category: "social", blocked: false, dailyLimitMin: 20 },
-  { name: "Facebook", category: "social", blocked: false },
-  { name: "Snapchat", category: "social", blocked: false },
-  { name: "Discord", category: "communication", blocked: false },
-  { name: "Netflix", category: "entertainment", blocked: false, dailyLimitMin: 60 },
-  { name: "Spotify", category: "entertainment", blocked: false },
-  { name: "WhatsApp", category: "communication", blocked: false },
-  { name: "Gmail", category: "productive", blocked: false },
-  { name: "Notion", category: "productive", blocked: false },
-  { name: "Chrome", category: "productive", blocked: false },
-  { name: "Duolingo", category: "productive", blocked: false },
-  { name: "PUBG", category: "gaming", blocked: true },
-  { name: "Free Fire", category: "gaming", blocked: true },
+  { name: "Instagram",    category: "social",         blocked: true,  blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["always"], permanent: true } },
+  { name: "TikTok",       category: "social",         blocked: true,  blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["always"], permanent: true } },
+  { name: "YouTube",      category: "entertainment",  blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["scheduled", "study_mode"], startTime: "08:00", endTime: "22:00", dailyLimitMin: 30 } },
+  { name: "Twitter / X",  category: "social",         blocked: true,  blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["always"], permanent: true } },
+  { name: "Reddit",       category: "social",         blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["study_mode", "deep_work", "weekdays_only"] } },
+  { name: "Facebook",     category: "social",         blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["scheduled"], startTime: "09:00", endTime: "20:00" } },
+  { name: "Snapchat",     category: "social",         blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: [] } },
+  { name: "Discord",      category: "communication",  blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["deep_work"] } },
+  { name: "WhatsApp",     category: "communication",  blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["usage_limit"], dailyLimitMin: 30 } },
+  { name: "Netflix",      category: "entertainment",  blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["monk_mode", "weekdays_only"] } },
+  { name: "Spotify",      category: "entertainment",  blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: [] } },
+  { name: "Gmail",        category: "productive",     blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: [] } },
+  { name: "Notion",       category: "productive",     blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: [] } },
+  { name: "Chrome",       category: "productive",     blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: [] } },
+  { name: "PUBG",         category: "gaming",         blocked: true,  blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["always"], permanent: true } },
+  { name: "Free Fire",    category: "gaming",         blocked: true,  blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["weekdays_only"] } },
+  { name: "Clash of Clans",category: "gaming",        blocked: true,  blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["always"], permanent: true } },
 ];
 
 const CATEGORY_COLORS: Record<AppCategory, string> = {
@@ -80,47 +130,54 @@ const CATEGORY_COLORS: Record<AppCategory, string> = {
 interface UsageContextValue {
   apps: AppEntry[];
   blockRules: BlockRule[];
-  usageLogs: UsageLog[];
+  whitelist: WhitelistEntry[];
   timetable: TimetableSlot[];
+  distractionLog: DistractionAttempt[];
   emergencyUnlock: EmergencyUnlock | null;
   lockModeEnabled: boolean;
   strictModeEnabled: boolean;
   addApp: (app: AppEntry) => void;
   removeApp: (name: string) => void;
   toggleAppBlocked: (name: string) => void;
-  setAppLimit: (name: string, minutes: number) => void;
+  updateAppConfig: (name: string, config: Partial<AppBlockConfig>) => void;
   addBlockRule: (rule: Omit<BlockRule, "id">) => void;
   removeBlockRule: (id: string) => void;
   toggleBlockRule: (id: string) => void;
-  logUsage: (appName: string, category: AppCategory, minutes: number) => void;
+  addToWhitelist: (entry: WhitelistEntry) => void;
+  removeFromWhitelist: (name: string) => void;
   addTimetableSlot: (slot: Omit<TimetableSlot, "id">) => void;
   removeTimetableSlot: (id: string) => void;
+  logDistractionAttempt: (appName: string, sessionMode?: string) => void;
   triggerEmergencyUnlock: () => boolean;
   setLockMode: (enabled: boolean) => void;
   setStrictMode: (enabled: boolean) => void;
   blockedApps: AppEntry[];
   categoryColors: typeof CATEGORY_COLORS;
-  todayUsageByCategory: Record<AppCategory, number>;
+  disciplineScore: number;
+  defaultBlockConfig: () => AppBlockConfig;
 }
 
 const UsageContext = createContext<UsageContextValue | null>(null);
 
-const APPS_KEY = "fs_apps_v2";
-const RULES_KEY = "fs_rules_v2";
-const LOGS_KEY = "fs_usage_logs";
-const TIMETABLE_KEY = "fs_timetable";
-const SETTINGS_KEY = "fs_usage_settings";
-
-function getDayKey(ts: number) {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+const APPS_KEY = "fs_apps_v3";
+const RULES_KEY = "fs_rules_v3";
+const WHITELIST_KEY = "fs_whitelist_v2";
+const TIMETABLE_KEY = "fs_timetable_v2";
+const SETTINGS_KEY = "fs_settings_v2";
+const DISTRACTION_KEY = "fs_distraction_log";
 
 export function UsageProvider({ children }: { children: React.ReactNode }) {
   const [apps, setApps] = useState<AppEntry[]>(DEFAULT_APPS);
   const [blockRules, setBlockRules] = useState<BlockRule[]>([]);
-  const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
+  const [whitelist, setWhitelist] = useState<WhitelistEntry[]>([
+    { name: "Phone", icon: "phone" },
+    { name: "Messages", icon: "message-circle" },
+    { name: "Calculator", icon: "hash" },
+    { name: "Notes", icon: "file-text" },
+    { name: "Camera", icon: "camera" },
+  ]);
   const [timetable, setTimetable] = useState<TimetableSlot[]>([]);
+  const [distractionLog, setDistractionLog] = useState<DistractionAttempt[]>([]);
   const [emergencyUnlock, setEmergencyUnlock] = useState<EmergencyUnlock | null>(null);
   const [lockModeEnabled, setLockModeEnabled] = useState(false);
   const [strictModeEnabled, setStrictModeEnabled] = useState(false);
@@ -128,180 +185,146 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [a, r, l, t, s] = await Promise.all([
+        const [a, r, w, t, s, d] = await Promise.all([
           AsyncStorage.getItem(APPS_KEY),
           AsyncStorage.getItem(RULES_KEY),
-          AsyncStorage.getItem(LOGS_KEY),
+          AsyncStorage.getItem(WHITELIST_KEY),
           AsyncStorage.getItem(TIMETABLE_KEY),
           AsyncStorage.getItem(SETTINGS_KEY),
+          AsyncStorage.getItem(DISTRACTION_KEY),
         ]);
         if (a) setApps(JSON.parse(a));
         if (r) setBlockRules(JSON.parse(r));
-        if (l) setUsageLogs(JSON.parse(l));
+        if (w) setWhitelist(JSON.parse(w));
         if (t) setTimetable(JSON.parse(t));
+        if (d) setDistractionLog(JSON.parse(d));
         if (s) {
-          const parsed = JSON.parse(s);
-          if (parsed.lockMode !== undefined) setLockModeEnabled(parsed.lockMode);
-          if (parsed.strictMode !== undefined) setStrictModeEnabled(parsed.strictMode);
+          const p = JSON.parse(s);
+          if (p.lockMode !== undefined) setLockModeEnabled(p.lockMode);
+          if (p.strictMode !== undefined) setStrictModeEnabled(p.strictMode);
         }
       } catch {}
     })();
   }, []);
 
-  const saveApps = useCallback(async (a: AppEntry[]) => {
-    try { await AsyncStorage.setItem(APPS_KEY, JSON.stringify(a)); } catch {}
-  }, []);
-  const saveRules = useCallback(async (r: BlockRule[]) => {
-    try { await AsyncStorage.setItem(RULES_KEY, JSON.stringify(r)); } catch {}
-  }, []);
-  const saveLogs = useCallback(async (l: UsageLog[]) => {
-    try { await AsyncStorage.setItem(LOGS_KEY, JSON.stringify(l.slice(0, 500))); } catch {}
-  }, []);
-  const saveTimetable = useCallback(async (t: TimetableSlot[]) => {
-    try { await AsyncStorage.setItem(TIMETABLE_KEY, JSON.stringify(t)); } catch {}
-  }, []);
-  const saveSettings = useCallback(async (lock: boolean, strict: boolean) => {
-    try { await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ lockMode: lock, strictMode: strict })); } catch {}
+  const save = useCallback(<T>(key: string, val: T) => {
+    try { AsyncStorage.setItem(key, JSON.stringify(val)); } catch {}
   }, []);
 
   const addApp = useCallback((app: AppEntry) => {
     setApps((prev) => {
       if (prev.some((a) => a.name === app.name)) return prev;
       const next = [...prev, app];
-      saveApps(next);
+      save(APPS_KEY, next);
       return next;
     });
-  }, [saveApps]);
+  }, [save]);
 
   const removeApp = useCallback((name: string) => {
-    setApps((prev) => {
-      const next = prev.filter((a) => a.name !== name);
-      saveApps(next);
-      return next;
-    });
-  }, [saveApps]);
+    setApps((prev) => { const n = prev.filter((a) => a.name !== name); save(APPS_KEY, n); return n; });
+  }, [save]);
 
   const toggleAppBlocked = useCallback((name: string) => {
     setApps((prev) => {
-      const next = prev.map((a) => a.name === name ? { ...a, blocked: !a.blocked } : a);
-      saveApps(next);
-      return next;
+      const n = prev.map((a) => a.name === name ? { ...a, blocked: !a.blocked } : a);
+      save(APPS_KEY, n);
+      return n;
     });
-  }, [saveApps]);
+  }, [save]);
 
-  const setAppLimit = useCallback((name: string, minutes: number) => {
+  const updateAppConfig = useCallback((name: string, config: Partial<AppBlockConfig>) => {
     setApps((prev) => {
-      const next = prev.map((a) => a.name === name ? { ...a, dailyLimitMin: minutes } : a);
-      saveApps(next);
-      return next;
+      const n = prev.map((a) => a.name === name ? { ...a, blockConfig: { ...a.blockConfig, ...config } } : a);
+      save(APPS_KEY, n);
+      return n;
     });
-  }, [saveApps]);
+  }, [save]);
 
   const addBlockRule = useCallback((rule: Omit<BlockRule, "id">) => {
-    const newRule: BlockRule = { ...rule, id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}` };
-    setBlockRules((prev) => {
-      const next = [...prev, newRule];
-      saveRules(next);
-      return next;
-    });
-  }, [saveRules]);
+    const nr: BlockRule = { ...rule, id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}` };
+    setBlockRules((prev) => { const n = [...prev, nr]; save(RULES_KEY, n); return n; });
+  }, [save]);
 
   const removeBlockRule = useCallback((id: string) => {
-    setBlockRules((prev) => {
-      const next = prev.filter((r) => r.id !== id);
-      saveRules(next);
-      return next;
-    });
-  }, [saveRules]);
+    setBlockRules((prev) => { const n = prev.filter((r) => r.id !== id); save(RULES_KEY, n); return n; });
+  }, [save]);
 
   const toggleBlockRule = useCallback((id: string) => {
-    setBlockRules((prev) => {
-      const next = prev.map((r) => r.id === id ? { ...r, enabled: !r.enabled } : r);
-      saveRules(next);
-      return next;
-    });
-  }, [saveRules]);
+    setBlockRules((prev) => { const n = prev.map((r) => r.id === id ? { ...r, enabled: !r.enabled } : r); save(RULES_KEY, n); return n; });
+  }, [save]);
 
-  const logUsage = useCallback((appName: string, category: AppCategory, minutes: number) => {
-    const entry: UsageLog = { date: getDayKey(Date.now()), appName, category, minutesUsed: minutes };
-    setUsageLogs((prev) => {
-      const next = [entry, ...prev];
-      saveLogs(next);
-      return next;
+  const addToWhitelist = useCallback((entry: WhitelistEntry) => {
+    setWhitelist((prev) => {
+      if (prev.some((w) => w.name === entry.name)) return prev;
+      const n = [...prev, entry];
+      save(WHITELIST_KEY, n);
+      return n;
     });
-  }, [saveLogs]);
+  }, [save]);
+
+  const removeFromWhitelist = useCallback((name: string) => {
+    setWhitelist((prev) => { const n = prev.filter((w) => w.name !== name); save(WHITELIST_KEY, n); return n; });
+  }, [save]);
 
   const addTimetableSlot = useCallback((slot: Omit<TimetableSlot, "id">) => {
-    const newSlot: TimetableSlot = { ...slot, id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}` };
-    setTimetable((prev) => {
-      const next = [...prev, newSlot];
-      saveTimetable(next);
-      return next;
-    });
-  }, [saveTimetable]);
+    const ns: TimetableSlot = { ...slot, id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}` };
+    setTimetable((prev) => { const n = [...prev, ns]; save(TIMETABLE_KEY, n); return n; });
+  }, [save]);
 
   const removeTimetableSlot = useCallback((id: string) => {
-    setTimetable((prev) => {
-      const next = prev.filter((s) => s.id !== id);
-      saveTimetable(next);
-      return next;
+    setTimetable((prev) => { const n = prev.filter((s) => s.id !== id); save(TIMETABLE_KEY, n); return n; });
+  }, [save]);
+
+  const logDistractionAttempt = useCallback((appName: string, sessionMode?: string) => {
+    setDistractionLog((prev) => {
+      const n = [{ appName, attemptedAt: Date.now(), sessionMode }, ...prev.slice(0, 99)];
+      save(DISTRACTION_KEY, n);
+      return n;
     });
-  }, [saveTimetable]);
+  }, [save]);
 
   const triggerEmergencyUnlock = useCallback((): boolean => {
     const COOLDOWN_MS = 30 * 60 * 1000;
-    if (emergencyUnlock && Date.now() - emergencyUnlock.unlockedAt < COOLDOWN_MS) {
-      return false;
-    }
-    setEmergencyUnlock({ unlockedAt: Date.now(), cooldownMs: COOLDOWN_MS });
+    if (emergencyUnlock && Date.now() - emergencyUnlock.unlockedAt < COOLDOWN_MS) return false;
+    const unlock = { unlockedAt: Date.now(), cooldownMs: COOLDOWN_MS };
+    setEmergencyUnlock(unlock);
     return true;
   }, [emergencyUnlock]);
 
   const setLockMode = useCallback((enabled: boolean) => {
     setLockModeEnabled(enabled);
-    saveSettings(enabled, strictModeEnabled);
-  }, [saveSettings, strictModeEnabled]);
+    save(SETTINGS_KEY, { lockMode: enabled, strictMode: strictModeEnabled });
+  }, [save, strictModeEnabled]);
 
   const setStrictMode = useCallback((enabled: boolean) => {
     setStrictModeEnabled(enabled);
-    saveSettings(lockModeEnabled, enabled);
-  }, [saveSettings, lockModeEnabled]);
-
-  const today = getDayKey(Date.now());
-  const todayLogs = usageLogs.filter((l) => l.date === today);
-  const todayUsageByCategory = todayLogs.reduce((acc, log) => {
-    acc[log.category] = (acc[log.category] ?? 0) + log.minutesUsed;
-    return acc;
-  }, {} as Record<AppCategory, number>);
+    save(SETTINGS_KEY, { lockMode: lockModeEnabled, strictMode: enabled });
+  }, [save, lockModeEnabled]);
 
   const blockedApps = apps.filter((a) => a.blocked);
+
+  const disciplineScore = Math.min(100, Math.round(
+    Math.max(0, 60 - distractionLog.filter((d) => {
+      const ms = Date.now() - d.attemptedAt;
+      return ms < 86400000;
+    }).length * 5) +
+    Math.min(40, blockedApps.length * 3)
+  ));
 
   return (
     <UsageContext.Provider
       value={{
-        apps,
-        blockRules,
-        usageLogs,
-        timetable,
-        emergencyUnlock,
-        lockModeEnabled,
-        strictModeEnabled,
-        addApp,
-        removeApp,
-        toggleAppBlocked,
-        setAppLimit,
-        addBlockRule,
-        removeBlockRule,
-        toggleBlockRule,
-        logUsage,
-        addTimetableSlot,
-        removeTimetableSlot,
+        apps, blockRules, whitelist, timetable, distractionLog, emergencyUnlock,
+        lockModeEnabled, strictModeEnabled,
+        addApp, removeApp, toggleAppBlocked, updateAppConfig,
+        addBlockRule, removeBlockRule, toggleBlockRule,
+        addToWhitelist, removeFromWhitelist,
+        addTimetableSlot, removeTimetableSlot,
+        logDistractionAttempt,
         triggerEmergencyUnlock,
-        setLockMode,
-        setStrictMode,
-        blockedApps,
-        categoryColors: CATEGORY_COLORS,
-        todayUsageByCategory,
+        setLockMode, setStrictMode,
+        blockedApps, categoryColors: CATEGORY_COLORS, disciplineScore,
+        defaultBlockConfig: DEFAULT_BLOCK_CONFIG,
       }}
     >
       {children}
