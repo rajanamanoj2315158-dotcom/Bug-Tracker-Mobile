@@ -23,9 +23,9 @@ const QUOTES = [
   "Focus on being productive instead of busy.",
   "Small disciplines repeated with consistency lead to great achievements.",
   "Your future is created by what you do today, not tomorrow.",
+  "Deep work is the superpower of the 21st century.",
   "The successful warrior is the average man with laser-like focus.",
   "It's not about having time. It's about making time.",
-  "Deep work is the superpower of the 21st century.",
 ];
 
 function formatMs(ms: number) {
@@ -36,30 +36,27 @@ function formatMs(ms: number) {
   return "< 1m";
 }
 
-function ScoreRing({
-  score,
-  size = 120,
-  strokeWidth = 10,
-}: {
-  score: number;
-  size?: number;
-  strokeWidth?: number;
-}) {
+// ─── Animated Score Ring ──────────────────────────────────────────────────────
+
+function ScoreRing({ score, size = 130, strokeWidth = 10 }: { score: number; size?: number; strokeWidth?: number }) {
   const colors = useColors();
-  const animVal = useRef(new Animated.Value(0)).current;
+  const breathAnim = useRef(new Animated.Value(0)).current;
+  const scoreAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.timing(animVal, {
-      toValue: score,
-      duration: 1000,
-      useNativeDriver: false,
-    }).start();
+    Animated.timing(scoreAnim, { toValue: score, duration: 1200, useNativeDriver: false }).start();
   }, [score]);
 
-  const r = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * r;
-  const cx = size / 2;
-  const cy = size / 2;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(breathAnim, { toValue: 1, duration: 3500, useNativeDriver: true }),
+        Animated.timing(breathAnim, { toValue: 0, duration: 3500, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, []);
 
   const getColor = (s: number) => {
     if (s >= 80) return colors.success;
@@ -67,73 +64,106 @@ function ScoreRing({
     if (s >= 25) return colors.warning;
     return colors.destructive;
   };
+  const ringColor = getColor(score);
+
+  const ringScale = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
+  const ringOpacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.2] });
+
+  const progress = score / 100;
+  const STROKE = strokeWidth;
 
   return (
-    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
-      <View
-        style={{
-          position: "absolute",
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          borderWidth: strokeWidth,
-          borderColor: colors.border,
-        }}
-      />
-      <View
-        style={{
-          position: "absolute",
-          width: size - strokeWidth * 2,
-          height: (size - strokeWidth * 2) * (score / 100),
-          bottom: strokeWidth,
-          borderRadius: size / 2,
-          backgroundColor: getColor(score) + "18",
-          overflow: "hidden",
-        }}
-      />
-      <View style={{ alignItems: "center" }}>
-        <Text
-          style={{
-            fontFamily: "Inter_700Bold",
-            fontSize: 32,
-            color: getColor(score),
-            letterSpacing: -1,
-          }}
-        >
-          {score}
-        </Text>
-        <Text style={{ fontFamily: "Inter_500Medium", fontSize: 11, color: colors.mutedForeground }}>
-          SCORE
-        </Text>
+    <View style={{ width: size + 24, height: size + 24, alignItems: "center", justifyContent: "center" }}>
+      {/* Outer glow ring */}
+      <Animated.View style={{
+        position: "absolute",
+        width: size + 24, height: size + 24,
+        borderRadius: (size + 24) / 2,
+        borderWidth: 1, borderColor: ringColor,
+        transform: [{ scale: ringScale }],
+        opacity: ringOpacity,
+      }} />
+
+      <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+        {/* Track */}
+        <View style={{
+          position: "absolute", inset: 0, borderRadius: size / 2,
+          borderWidth: STROKE, borderColor: "#142840",
+        }} />
+
+        {/* Progress arc */}
+        {Platform.OS === "web" ? (
+          <>
+            <View style={{
+              position: "absolute", inset: 0, borderRadius: size / 2,
+              // @ts-ignore
+              background: `conic-gradient(from -90deg, ${ringColor}88 ${Math.round(progress * 360)}deg, transparent ${Math.round(progress * 360)}deg)`,
+            }} />
+            <View style={{
+              position: "absolute", inset: STROKE,
+              borderRadius: (size - STROKE * 2) / 2,
+              backgroundColor: "#010f1f",
+            }} />
+          </>
+        ) : (
+          <View style={{
+            position: "absolute", inset: 0, borderRadius: size / 2,
+            borderWidth: STROKE, borderColor: "transparent", borderTopColor: ringColor,
+            transform: [{ rotate: `${progress * 360 - 90}deg` }],
+          }} />
+        )}
+
+        {/* Center */}
+        <View style={{ alignItems: "center" }}>
+          <Text style={{ fontFamily: "Inter_700Bold", fontSize: 30, color: ringColor, letterSpacing: -1 }}>{score}</Text>
+          <Text style={{ fontFamily: "Inter_600SemiBold", fontSize: 10, color: colors.mutedForeground, letterSpacing: 0.5 }}>SCORE</Text>
+        </View>
       </View>
-      <View
-        style={{
-          position: "absolute",
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          borderWidth: strokeWidth,
-          borderColor: "transparent",
-          borderTopColor: getColor(score),
-          transform: [{ rotate: `${(score / 100) * 360 - 90}deg` }],
-        }}
-      />
     </View>
   );
 }
 
-const MODE_INFO = {
-  pomodoro: { label: "Pomodoro", icon: "clock", color: "#f59e0b", desc: "25 min work cycles" },
-  deep: { label: "Deep Work", icon: "anchor", color: "#6366f1", desc: "90 min deep focus" },
-  monk: { label: "Monk Mode", icon: "moon", color: "#8b5cf6", desc: "3h total silence" },
-};
+// ─── Pulsing Live Dot ─────────────────────────────────────────────────────────
+
+function LiveDot({ color }: { color: string }) {
+  const pulse = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.5, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+
+  return (
+    <View style={{ width: 10, height: 10, alignItems: "center", justifyContent: "center" }}>
+      <Animated.View style={{
+        position: "absolute",
+        width: 10, height: 10, borderRadius: 5,
+        backgroundColor: color + "44",
+        transform: [{ scale: pulse }],
+      }} />
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
+    </View>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+
+const MODE_QUICK = [
+  { key: "pomodoro" as const, label: "Pomodoro", icon: "clock", color: "#f59e0b", desc: "25 min cycles" },
+  { key: "deep" as const, label: "Deep Work", icon: "anchor", color: "#6366f1", desc: "90 min focus" },
+  { key: "monk" as const, label: "Monk Mode", icon: "moon", color: "#8b5cf6", desc: "3h silence" },
+];
 
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { productivityScore, streak, todayFocusMs, currentSession, level, achievements, startSession } = useFocus();
+  const { productivityScore, streak, todayFocusMs, currentSession, level, achievements, startSession, weekFocusMs } = useFocus();
   const { completedHabitsToday, todayHabits, toggleHabitToday } = useHabits();
-  const { blockedApps } = useUsage();
+  const { blockedApps, disciplineScore } = useUsage();
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const quote = QUOTES[new Date().getDay() % QUOTES.length];
@@ -144,6 +174,9 @@ export default function HomeScreen() {
     if (h < 17) return "Good afternoon";
     return "Good evening";
   })();
+
+  const activeColor = currentSession?.customColor
+    ?? ({ pomodoro: "#f59e0b", study: "#38bdf8", deep: "#6366f1", monk: "#8b5cf6", detox: "#ec4899", founder: "#f97316", custom: "#38bdf8" }[currentSession?.mode ?? "custom"] ?? "#38bdf8");
 
   const styles = makeStyles(colors);
 
@@ -160,6 +193,7 @@ export default function HomeScreen() {
           <Text style={styles.headerTitle}>Focus Shield</Text>
         </View>
         <View style={styles.levelBadge}>
+          <Feather name="shield" size={11} color={colors.primary} />
           <Text style={styles.levelText}>LV{level}</Text>
         </View>
       </View>
@@ -167,18 +201,19 @@ export default function HomeScreen() {
       {/* Active Session Banner */}
       {currentSession && (
         <Pressable
-          style={({ pressed }) => [styles.activeBanner, pressed && { opacity: 0.85 }]}
+          style={({ pressed }) => [styles.activeBanner, { borderColor: activeColor + "55", backgroundColor: activeColor + "0C" }, pressed && { opacity: 0.85 }]}
           onPress={() => router.push("/focus")}
         >
-          <View style={styles.activeDot} />
+          <LiveDot color={activeColor} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.activeBannerTitle}>Session in Progress</Text>
+            <Text style={[styles.activeBannerTitle, { color: activeColor }]}>
+              {currentSession.customPresetName ?? "Focus Session"} {currentSession.paused ? "· PAUSED" : ""}
+            </Text>
             <Text style={styles.activeBannerSub}>
-              {currentSession.paused ? "Paused · " : ""}
-              {Math.ceil(currentSession.remainingMs / 60000)}m remaining
+              {Math.ceil(currentSession.remainingMs / 60000)}m remaining · tap to open timer
             </Text>
           </View>
-          <Feather name="chevron-right" size={16} color={colors.primary} />
+          <Feather name="chevron-right" size={16} color={activeColor} />
         </Pressable>
       )}
 
@@ -186,26 +221,47 @@ export default function HomeScreen() {
       <View style={styles.scoreSection}>
         <ScoreRing score={productivityScore} size={130} strokeWidth={10} />
         <View style={styles.scoreSide}>
-          <View style={styles.scoreStatRow}>
-            <Feather name="zap" size={14} color={colors.warning} />
-            <Text style={styles.scoreStatValue}>{streak}</Text>
-            <Text style={styles.scoreStatLabel}>day streak</Text>
+          <View style={styles.statRow}>
+            <Feather name="zap" size={13} color={colors.warning} />
+            <Text style={styles.statValue}>{streak}</Text>
+            <Text style={styles.statLabel}>day streak</Text>
           </View>
-          <View style={styles.scoreStatRow}>
-            <Feather name="clock" size={14} color={colors.primary} />
-            <Text style={styles.scoreStatValue}>{formatMs(todayFocusMs)}</Text>
-            <Text style={styles.scoreStatLabel}>focused today</Text>
+          <View style={styles.statRow}>
+            <Feather name="clock" size={13} color={colors.primary} />
+            <Text style={styles.statValue}>{formatMs(todayFocusMs)}</Text>
+            <Text style={styles.statLabel}>today</Text>
           </View>
-          <View style={styles.scoreStatRow}>
-            <Feather name="shield" size={14} color={colors.success} />
-            <Text style={styles.scoreStatValue}>{blockedApps.length}</Text>
-            <Text style={styles.scoreStatLabel}>apps blocked</Text>
+          <View style={styles.statRow}>
+            <Feather name="trending-up" size={13} color={colors.neonGreen} />
+            <Text style={styles.statValue}>{formatMs(weekFocusMs)}</Text>
+            <Text style={styles.statLabel}>this week</Text>
           </View>
-          <View style={styles.scoreStatRow}>
-            <Feather name="award" size={14} color={colors.accent} />
-            <Text style={styles.scoreStatValue}>{unlockedCount}</Text>
-            <Text style={styles.scoreStatLabel}>achievements</Text>
+          <View style={styles.statRow}>
+            <Feather name="shield" size={13} color={colors.success} />
+            <Text style={styles.statValue}>{blockedApps.length}</Text>
+            <Text style={styles.statLabel}>apps blocked</Text>
           </View>
+          <View style={styles.statRow}>
+            <Feather name="award" size={13} color={colors.accent} />
+            <Text style={styles.statValue}>{unlockedCount}/{achievements.length}</Text>
+            <Text style={styles.statLabel}>achievements</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Discipline score bar */}
+      <View style={styles.disciplineCard}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <Text style={styles.disciplineLabel}>Discipline Score</Text>
+          <Text style={[styles.disciplineValue, { color: disciplineScore >= 70 ? colors.success : disciplineScore >= 40 ? colors.warning : colors.destructive }]}>
+            {disciplineScore}/100 · {disciplineScore >= 80 ? "Excellent" : disciplineScore >= 60 ? "Good" : disciplineScore >= 40 ? "Building" : "Focus!"}
+          </Text>
+        </View>
+        <View style={styles.disciplineTrack}>
+          <View style={[styles.disciplineFill, {
+            width: `${disciplineScore}%` as any,
+            backgroundColor: disciplineScore >= 70 ? colors.success : disciplineScore >= 40 ? colors.warning : colors.destructive,
+          }]} />
         </View>
       </View>
 
@@ -213,21 +269,21 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Launch</Text>
         <View style={styles.modeRow}>
-          {(Object.entries(MODE_INFO) as [keyof typeof MODE_INFO, typeof MODE_INFO[keyof typeof MODE_INFO]][]).map(([key, info]) => (
+          {MODE_QUICK.map((m) => (
             <Pressable
-              key={key}
-              style={({ pressed }) => [styles.modeQuickCard, pressed && { opacity: 0.75, transform: [{ scale: 0.96 }] }]}
+              key={m.key}
+              style={({ pressed }) => [styles.modeCard, pressed && { opacity: 0.75, transform: [{ scale: 0.96 }] }]}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                startSession(key);
+                startSession(m.key);
                 router.push("/focus");
               }}
             >
-              <View style={[styles.modeQuickIcon, { backgroundColor: info.color + "22" }]}>
-                <Feather name={info.icon as any} size={18} color={info.color} />
+              <View style={[styles.modeCardIcon, { backgroundColor: m.color + "22" }]}>
+                <Feather name={m.icon as any} size={18} color={m.color} />
               </View>
-              <Text style={styles.modeQuickLabel}>{info.label}</Text>
-              <Text style={styles.modeQuickDesc}>{info.desc}</Text>
+              <Text style={styles.modeCardLabel}>{m.label}</Text>
+              <Text style={styles.modeCardDesc}>{m.desc}</Text>
             </Pressable>
           ))}
         </View>
@@ -238,7 +294,7 @@ export default function HomeScreen() {
         <View style={styles.section}>
           <View style={styles.sectionRow}>
             <Text style={styles.sectionTitle}>Today's Habits</Text>
-            <Text style={styles.sectionCount}>
+            <Text style={[styles.sectionCount, completedHabitsToday === todayHabits.length && { color: colors.success }]}>
               {completedHabitsToday}/{todayHabits.length}
             </Text>
           </View>
@@ -248,15 +304,12 @@ export default function HomeScreen() {
                 {idx > 0 && <View style={styles.rowDivider} />}
                 <Pressable
                   style={({ pressed }) => [styles.habitRow, pressed && { opacity: 0.7 }]}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    toggleHabitToday(habit.id);
-                  }}
+                  onPress={() => { Haptics.selectionAsync(); toggleHabitToday(habit.id); }}
                 >
-                  <View style={[styles.habitCheck, completed && styles.habitCheckDone]}>
-                    {completed && <Feather name="check" size={12} color={colors.primaryForeground} />}
+                  <View style={[styles.habitCheck, completed && { backgroundColor: colors.success, borderColor: colors.success }]}>
+                    {completed && <Feather name="check" size={11} color="#fff" />}
                   </View>
-                  <Text style={[styles.habitName, completed && styles.habitNameDone]}>
+                  <Text style={[styles.habitName, completed && { color: colors.mutedForeground, textDecorationLine: "line-through" }]}>
                     {habit.name}
                   </Text>
                   <Feather name={habit.icon as any} size={14} color={completed ? colors.success : colors.mutedForeground} />
@@ -269,17 +322,17 @@ export default function HomeScreen() {
 
       {/* Quote */}
       <View style={styles.quoteCard}>
-        <Feather name="message-circle" size={14} color={colors.primary} style={{ marginBottom: 6 }} />
+        <Feather name="message-circle" size={14} color={colors.primary} />
         <Text style={styles.quoteText}>"{quote}"</Text>
       </View>
 
-      {/* Achievements preview */}
+      {/* Achievements */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Achievements</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 0 }}>
-          {achievements.slice(0, 8).map((a) => (
-            <View key={a.id} style={[styles.achievementCard, !a.unlockedAt && styles.achievementCardLocked]}>
-              <View style={[styles.achievementIcon, a.unlockedAt ? styles.achievementIconUnlocked : styles.achievementIconLocked]}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+          {achievements.slice(0, 10).map((a) => (
+            <View key={a.id} style={[styles.achievementCard, !a.unlockedAt && { opacity: 0.4 }]}>
+              <View style={[styles.achievementIcon, { backgroundColor: a.unlockedAt ? colors.primary + "22" : colors.border }]}>
                 <Feather name={a.icon as any} size={18} color={a.unlockedAt ? colors.primary : colors.mutedForeground} />
               </View>
               <Text style={[styles.achievementTitle, !a.unlockedAt && { color: colors.mutedForeground }]} numberOfLines={2}>
@@ -298,41 +351,40 @@ function makeStyles(c: ReturnType<typeof useColors>) {
     container: { flex: 1, backgroundColor: c.background },
     header: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", paddingHorizontal: 24, marginBottom: 16 },
     greeting: { fontFamily: "Inter_400Regular", fontSize: 13, color: c.mutedForeground, marginBottom: 2 },
-    headerTitle: { fontFamily: "Inter_700Bold", fontSize: 24, color: c.foreground, letterSpacing: -0.6 },
-    levelBadge: { backgroundColor: c.primary + "22", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: c.primary + "55" },
+    headerTitle: { fontFamily: "Inter_700Bold", fontSize: 26, color: c.foreground, letterSpacing: -0.7 },
+    levelBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: c.primary + "18", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: c.glassBorder },
     levelText: { fontFamily: "Inter_700Bold", fontSize: 13, color: c.primary },
-    activeBanner: { flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: 20, marginBottom: 16, backgroundColor: c.primary + "18", borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.primary + "44" },
-    activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: c.primary },
-    activeBannerTitle: { fontFamily: "Inter_600SemiBold", fontSize: 14, color: c.foreground },
+    activeBanner: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 20, marginBottom: 16, borderRadius: 14, padding: 14, borderWidth: 1 },
+    activeBannerTitle: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
     activeBannerSub: { fontFamily: "Inter_400Regular", fontSize: 12, color: c.mutedForeground, marginTop: 1 },
-    scoreSection: { flexDirection: "row", alignItems: "center", paddingHorizontal: 24, gap: 24, marginBottom: 28 },
-    scoreSide: { flex: 1, gap: 12 },
-    scoreStatRow: { flexDirection: "row", alignItems: "center", gap: 7 },
-    scoreStatValue: { fontFamily: "Inter_700Bold", fontSize: 15, color: c.foreground },
-    scoreStatLabel: { fontFamily: "Inter_400Regular", fontSize: 12, color: c.mutedForeground },
+    scoreSection: { flexDirection: "row", alignItems: "center", paddingHorizontal: 24, gap: 20, marginBottom: 16 },
+    scoreSide: { flex: 1, gap: 9 },
+    statRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+    statValue: { fontFamily: "Inter_700Bold", fontSize: 14, color: c.foreground },
+    statLabel: { fontFamily: "Inter_400Regular", fontSize: 11, color: c.mutedForeground },
+    disciplineCard: { marginHorizontal: 20, marginBottom: 20, backgroundColor: c.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.glassBorder },
+    disciplineLabel: { fontFamily: "Inter_600SemiBold", fontSize: 12, color: c.mutedForeground, textTransform: "uppercase", letterSpacing: 0.5 },
+    disciplineValue: { fontFamily: "Inter_700Bold", fontSize: 13 },
+    disciplineTrack: { height: 5, backgroundColor: c.border, borderRadius: 3, overflow: "hidden" },
+    disciplineFill: { height: 5, borderRadius: 3 },
     section: { paddingHorizontal: 20, marginBottom: 20 },
-    sectionTitle: { fontFamily: "Inter_600SemiBold", fontSize: 12, color: c.mutedForeground, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 10 },
+    sectionTitle: { fontFamily: "Inter_600SemiBold", fontSize: 11, color: c.mutedForeground, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 10 },
     sectionRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
     sectionCount: { fontFamily: "Inter_600SemiBold", fontSize: 13, color: c.primary },
     modeRow: { flexDirection: "row", gap: 10 },
-    modeQuickCard: { flex: 1, backgroundColor: c.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.border, gap: 6 },
-    modeQuickIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", marginBottom: 2 },
-    modeQuickLabel: { fontFamily: "Inter_600SemiBold", fontSize: 13, color: c.foreground },
-    modeQuickDesc: { fontFamily: "Inter_400Regular", fontSize: 11, color: c.mutedForeground },
-    card: { backgroundColor: c.card, borderRadius: 14, borderWidth: 1, borderColor: c.border, overflow: "hidden" },
+    modeCard: { flex: 1, backgroundColor: c.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.glassBorder, gap: 5 },
+    modeCardIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", marginBottom: 2 },
+    modeCardLabel: { fontFamily: "Inter_600SemiBold", fontSize: 12, color: c.foreground },
+    modeCardDesc: { fontFamily: "Inter_400Regular", fontSize: 10, color: c.mutedForeground },
+    card: { backgroundColor: c.card, borderRadius: 14, borderWidth: 1, borderColor: c.glassBorder, overflow: "hidden" },
     habitRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
     habitCheck: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: c.border, alignItems: "center", justifyContent: "center" },
-    habitCheckDone: { backgroundColor: c.success, borderColor: c.success },
     habitName: { flex: 1, fontFamily: "Inter_500Medium", fontSize: 14, color: c.foreground },
-    habitNameDone: { color: c.mutedForeground, textDecorationLine: "line-through" },
     rowDivider: { height: 1, backgroundColor: c.border, marginLeft: 50 },
-    quoteCard: { marginHorizontal: 20, marginBottom: 20, backgroundColor: c.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: c.border, borderLeftWidth: 3, borderLeftColor: c.primary },
-    quoteText: { fontFamily: "Inter_400Regular", fontSize: 13, color: c.mutedForeground, lineHeight: 20, fontStyle: "italic" },
-    achievementCard: { width: 90, backgroundColor: c.card, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: c.border, alignItems: "center", gap: 8 },
-    achievementCardLocked: { opacity: 0.5 },
+    quoteCard: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginHorizontal: 20, marginBottom: 20, backgroundColor: c.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: c.glassBorder, borderLeftWidth: 3, borderLeftColor: c.primary },
+    quoteText: { flex: 1, fontFamily: "Inter_400Regular", fontSize: 13, color: c.mutedForeground, lineHeight: 20, fontStyle: "italic" },
+    achievementCard: { width: 88, backgroundColor: c.card, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: c.glassBorder, alignItems: "center", gap: 7 },
     achievementIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-    achievementIconUnlocked: { backgroundColor: c.primary + "22" },
-    achievementIconLocked: { backgroundColor: c.border },
-    achievementTitle: { fontFamily: "Inter_500Medium", fontSize: 11, color: c.foreground, textAlign: "center", lineHeight: 14 },
+    achievementTitle: { fontFamily: "Inter_500Medium", fontSize: 10, color: c.foreground, textAlign: "center", lineHeight: 14 },
   });
 }

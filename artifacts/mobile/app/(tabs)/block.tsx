@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useMemo, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Platform,
@@ -24,7 +25,7 @@ import {
   WhitelistEntry,
 } from "@/context/UsageContext";
 
-type Tab = "apps" | "schedule" | "strict" | "rules";
+type Tab = "apps" | "schedule" | "reels" | "strict" | "rules";
 
 const CATEGORIES: { key: AppCategory; label: string; color: string }[] = [
   { key: "social", label: "Social", color: "#f43f5e" },
@@ -631,14 +632,14 @@ export default function BlockScreen() {
 
       {/* Tabs */}
       <View style={styles.tabs}>
-        {(["apps", "schedule", "strict", "rules"] as Tab[]).map((t) => (
+        {(["apps", "schedule", "reels", "strict", "rules"] as Tab[]).map((t) => (
           <Pressable
             key={t}
             style={[styles.tab, activeTab === t && styles.tabActive]}
             onPress={() => { Haptics.selectionAsync(); setActiveTab(t); setExpandedApp(null); }}
           >
             <Text style={[styles.tabText, activeTab === t && styles.tabTextActive]}>
-              {t === "apps" ? "Apps" : t === "schedule" ? "Timeline" : t === "strict" ? "Strict" : "Rules"}
+              {t === "apps" ? "Apps" : t === "schedule" ? "Timeline" : t === "reels" ? "Reels" : t === "strict" ? "Strict" : "Rules"}
             </Text>
           </Pressable>
         ))}
@@ -796,6 +797,9 @@ export default function BlockScreen() {
             })}
           </View>
         )}
+
+        {/* ── REELS / SHORTS TAB ── */}
+        {activeTab === "reels" && <ReelsTab colors={colors} styles={styles} />}
 
         {/* ── STRICT TAB ── */}
         {activeTab === "strict" && (
@@ -995,6 +999,259 @@ export default function BlockScreen() {
   );
 }
 
+// ─── Reels Tab ────────────────────────────────────────────────────────────────
+
+const REELS_PLATFORMS = [
+  {
+    id: "instagram",
+    name: "Instagram",
+    icon: "camera" as const,
+    color: "#ec4899",
+    features: [
+      { key: "reels", label: "Block Reels feed" },
+      { key: "stories", label: "Block Stories autoplay" },
+      { key: "explore", label: "Block Explore tab" },
+    ],
+  },
+  {
+    id: "youtube",
+    name: "YouTube",
+    icon: "play-circle" as const,
+    color: "#ef4444",
+    features: [
+      { key: "shorts", label: "Block Shorts tab" },
+      { key: "autoplay", label: "Block video autoplay" },
+      { key: "recommendations", label: "Block homepage feed" },
+    ],
+  },
+  {
+    id: "tiktok",
+    name: "TikTok",
+    icon: "music" as const,
+    color: "#38bdf8",
+    features: [
+      { key: "foryou", label: "Block For You feed" },
+      { key: "following", label: "Block Following tab" },
+      { key: "live", label: "Block LIVE section" },
+    ],
+  },
+  {
+    id: "facebook",
+    name: "Facebook",
+    icon: "users" as const,
+    color: "#6366f1",
+    features: [
+      { key: "reels", label: "Block Facebook Reels" },
+      { key: "feed", label: "Block infinite news feed" },
+    ],
+  },
+  {
+    id: "twitter",
+    name: "X / Twitter",
+    icon: "twitter" as const,
+    color: "#4e6880",
+    features: [
+      { key: "trending", label: "Block Trending / Explore" },
+      { key: "foryou", label: "Block For You timeline" },
+    ],
+  },
+  {
+    id: "snapchat",
+    name: "Snapchat",
+    icon: "camera-off" as const,
+    color: "#f59e0b",
+    features: [
+      { key: "discover", label: "Block Discover feed" },
+      { key: "spotlight", label: "Block Spotlight (Shorts clone)" },
+    ],
+  },
+];
+
+function ReelsTab({ colors, styles }: { colors: ReturnType<typeof useColors>; styles: ReturnType<typeof makeStyles> }) {
+  const [blocked, setBlocked] = useState<Record<string, boolean>>({});
+  const [globalAutoplay, setGlobalAutoplay] = useState(true);
+  const [globalScroll, setGlobalScroll] = useState(false);
+  const [grayscale, setGrayscale] = useState(false);
+  const [dopamineDelay, setDopamineDelay] = useState(0);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem("fs_reels_v1");
+        if (raw) {
+          const d = JSON.parse(raw);
+          if (d.blocked) setBlocked(d.blocked);
+          if (typeof d.globalAutoplay === "boolean") setGlobalAutoplay(d.globalAutoplay);
+          if (typeof d.globalScroll === "boolean") setGlobalScroll(d.globalScroll);
+          if (typeof d.grayscale === "boolean") setGrayscale(d.grayscale);
+          if (typeof d.dopamineDelay === "number") setDopamineDelay(d.dopamineDelay);
+        }
+      } catch {}
+    })();
+  }, []);
+
+  const toggle = useCallback((key: string, value: boolean) => {
+    Haptics.selectionAsync();
+    const next = { ...blocked, [key]: value };
+    setBlocked(next);
+    try {
+      AsyncStorage.setItem("fs_reels_v1", JSON.stringify({ blocked: next, globalAutoplay, globalScroll, grayscale, dopamineDelay }));
+    } catch {}
+  }, [blocked, globalAutoplay, globalScroll, grayscale, dopamineDelay]);
+
+  const blockedCount = Object.values(blocked).filter(Boolean).length;
+
+  return (
+    <View style={styles.tabContent}>
+      {/* Header info */}
+      <View style={[styles.infoBox, { backgroundColor: colors.neon + "0A", borderColor: colors.neon + "33" }]}>
+        <Feather name="eye-off" size={13} color={colors.neon} />
+        <Text style={[styles.infoBoxText, { color: colors.mutedForeground }]}>
+          Block addictive short-form content while allowing normal app usage. {blockedCount > 0 ? `${blockedCount} features blocked.` : ""}
+        </Text>
+      </View>
+
+      {/* Per-platform cards */}
+      {REELS_PLATFORMS.map((platform) => {
+        const allOn = platform.features.every((f) => blocked[`${platform.id}_${f.key}`]);
+        return (
+          <View key={platform.id} style={[styles.card, { padding: 14, gap: 0 }]}>
+            {/* Platform header */}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
+              <View style={[{ width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" }, { backgroundColor: platform.color + "20" }]}>
+                <Feather name={platform.icon} size={17} color={platform.color} />
+              </View>
+              <Text style={[styles.label, { flex: 1 }]}>{platform.name}</Text>
+              <Pressable
+                style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  const newVal = !allOn;
+                  const next = { ...blocked };
+                  platform.features.forEach((f) => { next[`${platform.id}_${f.key}`] = newVal; });
+                  setBlocked(next);
+                  try { AsyncStorage.setItem("fs_reels_v1", JSON.stringify({ blocked: next, globalAutoplay, globalScroll, grayscale, dopamineDelay })); } catch {}
+                }}
+              >
+                <Text style={{ fontFamily: "Inter_600SemiBold", fontSize: 11, color: allOn ? platform.color : colors.mutedForeground }}>
+                  {allOn ? "All On" : "Block All"}
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* Features */}
+            {platform.features.map((feature, fi) => {
+              const key = `${platform.id}_${feature.key}`;
+              return (
+                <View key={feature.key}>
+                  {fi > 0 && <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 8 }} />}
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 2 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>{feature.label}</Text>
+                    </View>
+                    <Switch
+                      value={blocked[key] ?? false}
+                      onValueChange={(v) => toggle(key, v)}
+                      trackColor={{ false: colors.border, true: platform.color }}
+                      thumbColor={colors.foreground}
+                      ios_backgroundColor={colors.border}
+                    />
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        );
+      })}
+
+      {/* Global Controls */}
+      <Text style={styles.sectionLabel}>Global Controls</Text>
+      <View style={[styles.card, { padding: 16, gap: 14 }]}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={styles.label}>Block Autoplay Videos</Text>
+            <Text style={styles.sub}>Prevent videos from playing automatically</Text>
+          </View>
+          <Switch
+            value={globalAutoplay}
+            onValueChange={(v) => { Haptics.selectionAsync(); setGlobalAutoplay(v); }}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={colors.foreground}
+            ios_backgroundColor={colors.border}
+          />
+        </View>
+        <View style={{ height: 1, backgroundColor: colors.border }} />
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={styles.label}>Disable Infinite Scroll</Text>
+            <Text style={styles.sub}>Show a pause after every 10 items</Text>
+          </View>
+          <Switch
+            value={globalScroll}
+            onValueChange={(v) => { Haptics.selectionAsync(); setGlobalScroll(v); }}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={colors.foreground}
+            ios_backgroundColor={colors.border}
+          />
+        </View>
+        <View style={{ height: 1, backgroundColor: colors.border }} />
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={styles.label}>Grayscale During Sessions</Text>
+            <Text style={styles.sub}>Reduce visual stimulation while focused</Text>
+          </View>
+          <Switch
+            value={grayscale}
+            onValueChange={(v) => { Haptics.selectionAsync(); setGrayscale(v); }}
+            trackColor={{ false: colors.border, true: colors.neonPurple }}
+            thumbColor={colors.foreground}
+            ios_backgroundColor={colors.border}
+          />
+        </View>
+      </View>
+
+      {/* Dopamine Control */}
+      <Text style={styles.sectionLabel}>Dopamine Delay</Text>
+      <View style={[styles.card, { padding: 16, gap: 10 }]}>
+        <Text style={styles.sub}>Add a mindful pause before opening social apps. Forces a moment of intention.</Text>
+        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          {[0, 5, 10, 15, 30, 60].map((sec) => (
+            <Pressable
+              key={sec}
+              style={{
+                paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
+                backgroundColor: dopamineDelay === sec ? colors.neon + "18" : colors.surface,
+                borderWidth: 1, borderColor: dopamineDelay === sec ? colors.neon : colors.border,
+              }}
+              onPress={() => { Haptics.selectionAsync(); setDopamineDelay(sec); }}
+            >
+              <Text style={{ fontFamily: "Inter_500Medium", fontSize: 12, color: dopamineDelay === sec ? colors.neon : colors.mutedForeground }}>
+                {sec === 0 ? "Off" : `${sec}s`}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        {dopamineDelay > 0 && (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.neon + "0C", borderRadius: 8, padding: 10 }}>
+            <Feather name="info" size={12} color={colors.neon} />
+            <Text style={{ fontFamily: "Inter_400Regular", fontSize: 11, color: colors.mutedForeground, flex: 1 }}>
+              A {dopamineDelay}s breathing screen will appear before opening blocked social apps.
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Note */}
+      <View style={[styles.infoBox, { marginTop: 4 }]}>
+        <Feather name="info" size={13} color={colors.mutedForeground} />
+        <Text style={styles.infoBoxText}>
+          Full content-level blocking (e.g. hiding only the Shorts tab) requires the Android Accessibility Service. These settings log your blocking preferences and activate with the native module.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function makeStyles(c: ReturnType<typeof useColors>) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: c.background },
@@ -1075,5 +1332,6 @@ function makeStyles(c: ReturnType<typeof useColors>) {
     ruleIcon: { width: 30, height: 30, borderRadius: 8, alignItems: "center", justifyContent: "center" },
     ruleValue: { fontFamily: "Inter_500Medium", fontSize: 14, color: c.foreground },
     ruleType: { fontFamily: "Inter_400Regular", fontSize: 11, color: c.mutedForeground, textTransform: "capitalize", marginTop: 1 },
+    sectionLabel: { fontFamily: "Inter_600SemiBold", fontSize: 11, color: c.mutedForeground, letterSpacing: 0.6, textTransform: "uppercase", marginTop: 4, marginBottom: 6 },
   });
 }
