@@ -21,7 +21,7 @@ import { FocusProvider } from "@/context/FocusContext";
 import { HabitProvider } from "@/context/HabitContext";
 import { UsageProvider } from "@/context/UsageContext";
 
-SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 const queryClient = new QueryClient();
 
@@ -43,7 +43,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
+      SplashScreen.hideAsync().catch(() => undefined);
     }
   }, [fontsLoaded, fontError]);
 

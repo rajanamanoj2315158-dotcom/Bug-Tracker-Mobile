@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Focus Shield",
-    "slug": "mobile",
+    "slug": "focus-shield",
     "version": "1.0.0",
     "description": "Focus Shield is an offline-first native mobile focus app with strict sessions, timer recovery, app-blocking rules, haptics, streaks, and analytics.",
     "platforms": [
@@ -10,7 +10,7 @@
     ],
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "focusshield",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
@@ -43,12 +43,7 @@
       "backgroundColor": "#010f1f"
     },
     "plugins": [
-      [
-        "expo-router",
-        {
-          "origin": "https://replit.com/"
-        }
-      ],
+      "expo-router",
       "expo-font"
     ],
     "experiments": {
