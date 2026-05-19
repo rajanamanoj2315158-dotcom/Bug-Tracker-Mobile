@@ -86,6 +86,9 @@ const CHALLENGES_KEY = "fs_challenges_v2";
 const MAX_HABIT_NAME_LENGTH = 60;
 const MAX_GOAL_TEXT_LENGTH = 120;
 const MAX_DAILY_GOALS = 10;
+const MAX_HABITS = 100;
+const MAX_GOAL_HISTORY = 1000;
+const MAX_HABIT_COMPLETION_DAYS = 730;
 
 function createDefaultChallenges(): Challenge[] {
   return PREDEFINED_CHALLENGES.map((ch) => ({
@@ -94,6 +97,30 @@ function createDefaultChallenges(): Challenge[] {
     completedDays: [],
     active: false,
   }));
+}
+
+function sanitizeHabits(items: Habit[]): Habit[] {
+  return items
+    .filter((habit) => habit && typeof habit.id === "string" && typeof habit.name === "string")
+    .map((habit) => ({
+      ...habit,
+      name: habit.name.trim().slice(0, MAX_HABIT_NAME_LENGTH) || "Habit",
+      completedDates: [...new Set(Array.isArray(habit.completedDates) ? habit.completedDates : [])]
+        .filter((date) => typeof date === "string")
+        .slice(-MAX_HABIT_COMPLETION_DAYS),
+    }))
+    .slice(0, MAX_HABITS);
+}
+
+function sanitizeGoals(items: DailyGoal[]): DailyGoal[] {
+  return items
+    .filter((goal) => goal && typeof goal.id === "string" && typeof goal.text === "string" && typeof goal.date === "string")
+    .map((goal) => ({
+      ...goal,
+      text: goal.text.trim().slice(0, MAX_GOAL_TEXT_LENGTH) || "Goal",
+      completed: goal.completed === true,
+    }))
+    .slice(-MAX_GOAL_HISTORY);
 }
 
 export function HabitProvider({ children }: { children: React.ReactNode }) {
@@ -110,9 +137,13 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
           getJson<DailyGoal[]>(GOALS_KEY, [], isArray as (value: unknown) => value is DailyGoal[]),
           getJson<Challenge[]>(CHALLENGES_KEY, defaults, isArray as (value: unknown) => value is Challenge[]),
         ]);
-        setHabits(storedHabits);
-        setGoals(storedGoals);
+        const boundedHabits = sanitizeHabits(storedHabits);
+        const boundedGoals = sanitizeGoals(storedGoals);
+        setHabits(boundedHabits);
+        setGoals(boundedGoals);
         setChallenges(storedChallenges);
+        if (boundedHabits.length !== storedHabits.length) await setJson(HABITS_KEY, boundedHabits);
+        if (boundedGoals.length !== storedGoals.length) await setJson(GOALS_KEY, boundedGoals);
         if (storedChallenges.length === defaults.length && storedChallenges.every((challenge) => challenge.startedAt === 0 && !challenge.active)) {
           await setJson(CHALLENGES_KEY, storedChallenges);
         }
@@ -121,10 +152,10 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const saveHabits = useCallback(async (h: Habit[]) => {
-    await setJson(HABITS_KEY, h);
+    await setJson(HABITS_KEY, sanitizeHabits(h));
   }, []);
   const saveGoals = useCallback(async (g: DailyGoal[]) => {
-    await setJson(GOALS_KEY, g);
+    await setJson(GOALS_KEY, sanitizeGoals(g));
   }, []);
   const saveChallenges = useCallback(async (c: Challenge[]) => {
     await setJson(CHALLENGES_KEY, c);
@@ -141,7 +172,7 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
     };
     setHabits((prev) => {
       if (prev.some((h) => h.name.toLowerCase() === safeName.toLowerCase())) return prev;
-      const next = [...prev, habit];
+      const next = sanitizeHabits([...prev, habit]);
       saveHabits(next);
       return next;
     });
@@ -165,7 +196,7 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
           ...h,
           completedDates: done
             ? h.completedDates.filter((d) => d !== today)
-            : [...h.completedDates, today],
+            : [...h.completedDates, today].slice(-MAX_HABIT_COMPLETION_DAYS),
         };
       });
       saveHabits(next);
@@ -186,7 +217,7 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
     setGoals((prev) => {
       const todayGoalCount = prev.filter((g) => g.date === today).length;
       if (todayGoalCount >= MAX_DAILY_GOALS) return prev;
-      const next = [...prev, goal];
+      const next = sanitizeGoals([...prev, goal]);
       saveGoals(next);
       return next;
     });
