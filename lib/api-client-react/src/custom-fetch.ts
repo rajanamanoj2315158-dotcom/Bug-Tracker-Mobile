@@ -1,5 +1,6 @@
 export type CustomFetchOptions = RequestInit & {
   responseType?: "json" | "text" | "blob" | "auto";
+  timeoutMs?: number;
 };
 
 export type ErrorType<T = unknown> = ApiError<T>;
@@ -10,6 +11,7 @@ export type AuthTokenGetter = () => Promise<string | null> | string | null;
 
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // Module-level configuration
@@ -17,6 +19,7 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _defaultTimeoutMs = DEFAULT_TIMEOUT_MS;
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -26,7 +29,19 @@ let _authTokenGetter: AuthTokenGetter | null = null;
  * Pass `null` to clear the base URL.
  */
 export function setBaseUrl(url: string | null): void {
-  _baseUrl = url ? url.replace(/\/+$/, "") : null;
+  if (url === null) {
+    _baseUrl = null;
+    return;
+  }
+
+  const trimmed = url.trim();
+  const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const parsed = new URL(normalized);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new TypeError("setBaseUrl only accepts http or https URLs.");
+  }
+
+  _baseUrl = parsed.toString().replace(/\/+$/, "");
 }
 
 /**
@@ -42,6 +57,13 @@ export function setBaseUrl(url: string | null): void {
  */
 export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
+}
+
+export function setDefaultTimeoutMs(timeoutMs: number): void {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new TypeError("setDefaultTimeoutMs expects a non-negative finite number.");
+  }
+  _defaultTimeoutMs = timeoutMs;
 }
 
 function isRequest(input: RequestInfo | URL): input is Request {
@@ -89,6 +111,47 @@ function mergeHeaders(...sources: Array<HeadersInit | undefined>): Headers {
   }
 
   return headers;
+}
+
+function buildAbortSignal(
+  signals: Array<AbortSignal | null | undefined>,
+  timeoutMs: number,
+): { signal?: AbortSignal; cleanup: () => void } {
+  const activeSignals = signals.filter(Boolean) as AbortSignal[];
+  if (timeoutMs <= 0 && activeSignals.length === 0) {
+    return { cleanup: () => undefined };
+  }
+
+  const controller = new AbortController();
+  const cleanupCallbacks: Array<() => void> = [];
+
+  const abort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
+  };
+
+  for (const signal of activeSignals) {
+    if (signal.aborted) {
+      abort();
+      continue;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+    cleanupCallbacks.push(() => signal.removeEventListener("abort", abort));
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  if (timeoutMs > 0) {
+    timeoutId = setTimeout(abort, timeoutMs);
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      cleanupCallbacks.forEach((cleanup) => cleanup());
+    },
+  };
 }
 
 function getMediaType(headers: Headers): string | null {
@@ -327,7 +390,13 @@ export async function customFetch<T = unknown>(
   options: CustomFetchOptions = {},
 ): Promise<T> {
   input = applyBaseUrl(input);
-  const { responseType = "auto", headers: headersInit, ...init } = options;
+  const {
+    responseType = "auto",
+    headers: headersInit,
+    timeoutMs = _defaultTimeoutMs,
+    signal,
+    ...init
+  } = options;
 
   const method = resolveMethod(input, init.method);
 
@@ -359,13 +428,21 @@ export async function customFetch<T = unknown>(
   }
 
   const requestInfo = { method, url: resolveUrl(input) };
+  const abortSignal = buildAbortSignal(
+    [signal, isRequest(input) ? input.signal : undefined],
+    timeoutMs,
+  );
 
-  const response = await fetch(input, { ...init, method, headers });
+  try {
+    const response = await fetch(input, { ...init, method, headers, signal: abortSignal.signal });
 
-  if (!response.ok) {
-    const errorData = await parseErrorBody(response, method);
-    throw new ApiError(response, errorData, requestInfo);
+    if (!response.ok) {
+      const errorData = await parseErrorBody(response, method);
+      throw new ApiError(response, errorData, requestInfo);
+    }
+
+    return (await parseSuccessBody(response, responseType, requestInfo)) as T;
+  } finally {
+    abortSignal.cleanup();
   }
-
-  return (await parseSuccessBody(response, responseType, requestInfo)) as T;
 }
