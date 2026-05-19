@@ -60,8 +60,17 @@ const TIMER_MODES: { key: TimerMode; label: string; icon: string; desc: string }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
+function safeMs(ms: number) {
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
+
+function clamp01(value: number) {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+}
+
 function formatTime(ms: number, isStopwatch = false) {
-  const total = isStopwatch ? Math.floor(ms / 1000) : Math.ceil(ms / 1000);
+  const boundedMs = safeMs(ms);
+  const total = isStopwatch ? Math.floor(boundedMs / 1000) : Math.ceil(boundedMs / 1000);
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
@@ -70,8 +79,9 @@ function formatTime(ms: number, isStopwatch = false) {
 }
 
 function formatMs(ms: number) {
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
+  const boundedMs = safeMs(ms);
+  const h = Math.floor(boundedMs / 3600000);
+  const m = Math.floor((boundedMs % 3600000) / 60000);
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m`;
   return "< 1m";
@@ -119,6 +129,7 @@ function BreathOrbTimer({
   const r2Scale = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.07] });
   const r2Opacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.08, isActive ? 0.42 : 0.15] });
   const innerGlow = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.03, isActive ? 0.16 : 0.06] });
+  const safeProgress = clamp01(progress);
 
   return (
     <View style={{ width: ring1, height: ring1, alignItems: "center", justifyContent: "center" }}>
@@ -162,7 +173,7 @@ function BreathOrbTimer({
               style={{
                 position: "absolute", inset: 0, borderRadius: size / 2,
                 // @ts-ignore — web-only conic-gradient
-                background: `conic-gradient(from -90deg, ${color}99 ${Math.round(progress * 360)}deg, transparent ${Math.round(progress * 360)}deg)`,
+                background: `conic-gradient(from -90deg, ${color}99 ${Math.round(safeProgress * 360)}deg, transparent ${Math.round(safeProgress * 360)}deg)`,
               }}
             />
             <View
@@ -183,12 +194,12 @@ function BreathOrbTimer({
                   width: size, height: size, borderRadius: size / 2,
                   borderWidth: STROKE, borderColor: "transparent",
                   borderTopColor: color + "99", borderRightColor: color + "99",
-                  transform: [{ rotate: `${Math.min(progress, 0.5) * 360 + 180}deg` }],
+                  transform: [{ rotate: `${Math.min(safeProgress, 0.5) * 360 + 180}deg` }],
                 }}
               />
             </View>
             {/* Left half */}
-            {progress > 0.5 && (
+            {safeProgress > 0.5 && (
               <View style={{ position: "absolute", top: 0, left: 0, width: size / 2, height: size, overflow: "hidden" }}>
                 <View
                   style={{
@@ -196,7 +207,7 @@ function BreathOrbTimer({
                     width: size, height: size, borderRadius: size / 2,
                     borderWidth: STROKE, borderColor: "transparent",
                     borderTopColor: color + "99", borderLeftColor: color + "99",
-                    transform: [{ rotate: `${(progress - 0.5) * 360}deg` }],
+                    transform: [{ rotate: `${(safeProgress - 0.5) * 360}deg` }],
                   }}
                 />
               </View>
@@ -206,7 +217,7 @@ function BreathOrbTimer({
               style={{
                 position: "absolute", inset: 0, borderRadius: size / 2,
                 borderWidth: STROKE, borderColor: "transparent", borderTopColor: color,
-                transform: [{ rotate: `${progress * 360 - 90}deg` }],
+                transform: [{ rotate: `${safeProgress * 360 - 90}deg` }],
               }}
             />
           </>
@@ -525,8 +536,8 @@ export default function FocusScreen() {
 
   const progress = currentSession
     ? isStopwatch
-      ? Math.min((currentSession.remainingMs / (currentSession.durationMs || 1)) % 1, 1)
-      : 1 - currentSession.remainingMs / (currentSession.durationMs || 1)
+      ? clamp01((safeMs(currentSession.remainingMs) / Math.max(1, safeMs(currentSession.durationMs))) % 1)
+      : clamp01(1 - safeMs(currentSession.remainingMs) / Math.max(1, safeMs(currentSession.durationMs)))
     : 0;
 
   const activeModeName = currentSession?.customPresetName

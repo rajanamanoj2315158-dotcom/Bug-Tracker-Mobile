@@ -24,11 +24,15 @@ const MESSAGES = [
 ];
 
 function formatRemaining(ms: number) {
-  const safe = Math.max(0, ms);
+  const safe = Number.isFinite(ms) ? Math.max(0, ms) : 0;
   const totalSec = Math.floor(safe / 1000);
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function clamp01(value: number) {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 }
 
 export default function StrictModeOverlay() {
@@ -124,15 +128,17 @@ export default function StrictModeOverlay() {
 
   const remaining = useMemo(() => {
     if (!activeSession) return 0;
-    return Math.max(0, activeSession.endTime - now);
+    const value = activeSession.endTime - now;
+    return Number.isFinite(value) ? Math.max(0, value) : 0;
   }, [activeSession, now]);
 
   if (!overlayActive || !activeSession) return null;
 
   const unlockState = requestEmergencyUnlock();
-  const totalDuration = Math.max(1, activeSession.endTime - activeSession.startTime);
-  const sessionPct = Math.min(1, Math.max(0, (now - activeSession.startTime) / totalDuration));
-  const holdSec = Math.ceil((HOLD_MS * (1 - holdProgress)) / 1000);
+  const totalDuration = Number.isFinite(activeSession.endTime - activeSession.startTime) ? Math.max(1, activeSession.endTime - activeSession.startTime) : 1;
+  const sessionPct = clamp01((now - activeSession.startTime) / totalDuration);
+  const safeHoldProgress = clamp01(holdProgress);
+  const holdSec = Math.ceil((HOLD_MS * (1 - safeHoldProgress)) / 1000);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 18, paddingBottom: insets.bottom + 18 }]}>
@@ -203,7 +209,7 @@ export default function StrictModeOverlay() {
             : `Cooldown: ${Math.ceil(unlockState.cooldownRemainingMs / 60000)} min`}
         </Text>
         <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${holdProgress * 100}%` }]} />
+          <View style={[styles.progressFill, { width: `${safeHoldProgress * 100}%` }]} />
         </View>
       </Pressable>
 

@@ -29,11 +29,16 @@ const QUOTES = [
 ];
 
 function formatMs(ms: number) {
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
+  const safe = Number.isFinite(ms) && ms > 0 ? ms : 0;
+  const h = Math.floor(safe / 3600000);
+  const m = Math.floor((safe % 3600000) / 60000);
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m`;
   return "< 1m";
+}
+
+function clampPercent(value: number) {
+  return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
 }
 
 // ─── Animated Score Ring ──────────────────────────────────────────────────────
@@ -44,7 +49,7 @@ function ScoreRing({ score, size = 130, strokeWidth = 10 }: { score: number; siz
   const scoreAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.timing(scoreAnim, { toValue: score, duration: 1200, useNativeDriver: false }).start();
+    Animated.timing(scoreAnim, { toValue: clampPercent(score), duration: 1200, useNativeDriver: false }).start();
   }, [score]);
 
   useEffect(() => {
@@ -64,12 +69,13 @@ function ScoreRing({ score, size = 130, strokeWidth = 10 }: { score: number; siz
     if (s >= 25) return colors.warning;
     return colors.destructive;
   };
-  const ringColor = getColor(score);
+  const safeScore = clampPercent(score);
+  const ringColor = getColor(safeScore);
 
   const ringScale = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
   const ringOpacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.2] });
 
-  const progress = score / 100;
+  const progress = safeScore / 100;
   const STROKE = strokeWidth;
 
   return (
@@ -115,7 +121,7 @@ function ScoreRing({ score, size = 130, strokeWidth = 10 }: { score: number; siz
 
         {/* Center */}
         <View style={{ alignItems: "center" }}>
-          <Text style={{ fontFamily: "Inter_700Bold", fontSize: 30, color: ringColor, letterSpacing: -1 }}>{score}</Text>
+          <Text style={{ fontFamily: "Inter_700Bold", fontSize: 30, color: ringColor, letterSpacing: -1 }}>{safeScore}</Text>
           <Text style={{ fontFamily: "Inter_600SemiBold", fontSize: 10, color: colors.mutedForeground, letterSpacing: 0.5 }}>SCORE</Text>
         </View>
       </View>
@@ -210,7 +216,7 @@ export default function HomeScreen() {
               {currentSession.customPresetName ?? "Focus Session"} {currentSession.paused ? "· PAUSED" : ""}
             </Text>
             <Text style={styles.activeBannerSub}>
-              {Math.ceil(currentSession.remainingMs / 60000)}m remaining · tap to open timer
+              {Math.ceil((Number.isFinite(currentSession.remainingMs) ? Math.max(0, currentSession.remainingMs) : 0) / 60000)}m remaining · tap to open timer
             </Text>
           </View>
           <Feather name="chevron-right" size={16} color={activeColor} />
@@ -259,7 +265,7 @@ export default function HomeScreen() {
         </View>
         <View style={styles.disciplineTrack}>
           <View style={[styles.disciplineFill, {
-            width: `${disciplineScore}%` as any,
+            width: `${clampPercent(disciplineScore)}%` as any,
             backgroundColor: disciplineScore >= 70 ? colors.success : disciplineScore >= 40 ? colors.warning : colors.destructive,
           }]} />
         </View>

@@ -15,9 +15,18 @@ import { useUsage } from "@/context/UsageContext";
 
 type Period = "week" | "month";
 
+function safeMs(ms: number) {
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
+
+function clamp01(value: number) {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+}
+
 function formatMs(ms: number) {
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
+  const boundedMs = safeMs(ms);
+  const h = Math.floor(boundedMs / 3600000);
+  const m = Math.floor((boundedMs % 3600000) / 60000);
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m`;
   return "< 1m";
@@ -29,6 +38,7 @@ function getDayKey(ts: number) {
 }
 
 function formatDate(ts: number) {
+  if (!Number.isFinite(ts)) return "Unknown";
   const d = new Date(ts);
   const now = new Date();
   const isToday = getDayKey(ts) === getDayKey(Date.now());
@@ -39,6 +49,7 @@ function formatDate(ts: number) {
 }
 
 function formatTime12(ts: number) {
+  if (!Number.isFinite(ts)) return "--";
   return new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
@@ -66,7 +77,7 @@ function WeekChart({ sessions, period }: { sessions: SessionRecord[]; period: Pe
   if (period === "week") {
     const dayMs = (days as Date[]).map((d) => {
       const key = getDayKey(d.getTime());
-      return sessions.filter((s) => getDayKey(s.startedAt) === key).reduce((a, s) => a + s.completedMs, 0);
+      return sessions.filter((s) => getDayKey(s.startedAt) === key).reduce((a, s) => a + safeMs(s.completedMs), 0);
     });
     const maxMs = Math.max(...dayMs, 1);
     const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -74,7 +85,7 @@ function WeekChart({ sessions, period }: { sessions: SessionRecord[]; period: Pe
     return (
       <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6, height: 80 }}>
         {(days as Date[]).map((d, i) => {
-          const ratio = dayMs[i] / maxMs;
+          const ratio = clamp01(dayMs[i] / maxMs);
           const isToday = i === 6;
           return (
             <View key={i} style={{ flex: 1, alignItems: "center", gap: 4 }}>
@@ -98,7 +109,7 @@ function WeekChart({ sessions, period }: { sessions: SessionRecord[]; period: Pe
   const weekMs = (days as { weekStart: number }[]).map(({ weekStart }) =>
     sessions
       .filter((s) => s.startedAt >= weekStart && s.startedAt < weekStart + 7 * 86400000)
-      .reduce((a, s) => a + s.completedMs, 0)
+      .reduce((a, s) => a + safeMs(s.completedMs), 0)
   );
   const maxMs = Math.max(...weekMs, 1);
 
@@ -106,7 +117,7 @@ function WeekChart({ sessions, period }: { sessions: SessionRecord[]; period: Pe
     <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, height: 80 }}>
       {weekMs.map((ms, i) => (
         <View key={i} style={{ flex: 1, alignItems: "center", gap: 4 }}>
-          <View style={{ width: "100%", borderRadius: 4, height: Math.max(4, 60 * ms / maxMs), backgroundColor: i === 3 ? colors.primary : colors.primary + "55" }} />
+          <View style={{ width: "100%", borderRadius: 4, height: Math.max(4, 60 * clamp01(ms / maxMs)), backgroundColor: i === 3 ? colors.primary : colors.primary + "55" }} />
           <Text style={{ fontFamily: "Inter_400Regular", fontSize: 9, color: colors.mutedForeground }}>{weekLabels[i]}</Text>
         </View>
       ))}
@@ -118,16 +129,16 @@ function ModePieChart({ sessions }: { sessions: SessionRecord[] }) {
   const colors = useColors();
   const byMode: Record<string, number> = {};
   sessions.forEach((s) => {
-    byMode[s.mode] = (byMode[s.mode] ?? 0) + s.completedMs;
+    byMode[s.mode] = (byMode[s.mode] ?? 0) + safeMs(s.completedMs);
   });
-  const total = Object.values(byMode).reduce((a, b) => a + b, 0) || 1;
+  const total = Math.max(1, Object.values(byMode).reduce((a, b) => a + safeMs(b), 0));
   const entries = Object.entries(byMode).sort((a, b) => b[1] - a[1]);
 
   return (
     <View style={{ gap: 10 }}>
       {entries.map(([mode, ms]) => {
         const meta = MODE_META[mode] ?? { label: mode, color: colors.primary, icon: "circle" };
-        const pct = Math.round((ms / total) * 100);
+        const pct = Math.round(clamp01(ms / total) * 100);
         return (
           <View key={mode} style={{ gap: 5 }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
