@@ -388,10 +388,22 @@ const PRESETS_KEY = "fs_custom_presets_v1";
 const ACTIVE_SESSION_KEY = "fs_active_session_v2";
 const ACTIVE_SESSION_SCHEMA_VERSION = 2;
 const MAX_SESSION_RECORDS = 1000;
+const MAX_SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
+const MIN_SESSION_TIMESTAMP = Date.UTC(2020, 0, 1);
+const MAX_SESSION_FUTURE_DRIFT_MS = 15 * 60 * 1000;
 const MAX_CUSTOM_PRESETS = 50;
 const MIN_CUSTOM_DURATION_MIN = 1;
 const MAX_CUSTOM_DURATION_MIN = 12 * 60;
 const MAX_CUSTOM_BREAK_MIN = 3 * 60;
+const SESSION_MODES = new Set<SessionMode>([
+  "pomodoro",
+  "study",
+  "deep",
+  "monk",
+  "detox",
+  "founder",
+  "custom",
+]);
 
 function isPersistedActiveSession(
   value: unknown,
@@ -415,6 +427,10 @@ function asStringArray(value: unknown): value is string[] {
 function clampNumber(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
+}
+
+function isSessionMode(value: unknown): value is SessionMode {
+  return typeof value === "string" && SESSION_MODES.has(value as SessionMode);
 }
 
 function sanitizeCustomPreset(preset: Partial<CustomPreset>): CustomPreset {
@@ -454,18 +470,60 @@ function sanitizeCustomPreset(preset: Partial<CustomPreset>): CustomPreset {
   };
 }
 
-function sanitizeSessionRecords(records: SessionRecord[]): SessionRecord[] {
+function isPlausibleSessionTimestamp(
+  value: unknown,
+  now: number,
+): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= MIN_SESSION_TIMESTAMP &&
+    value <= now + MAX_SESSION_FUTURE_DRIFT_MS
+  );
+}
+
+function sanitizeSessionRecords(records: unknown[]): SessionRecord[] {
+  const now = Date.now();
   return records
-    .filter(
-      (record) =>
-        typeof record === "object" &&
-        record !== null &&
-        typeof record.id === "string" &&
-        typeof record.startedAt === "number" &&
-        typeof record.endedAt === "number" &&
-        typeof record.completedMs === "number" &&
-        record.completedMs >= 0,
-    )
+    .filter(isRecord)
+    .map((record): SessionRecord | null => {
+      if (typeof record.id !== "string" || !record.id.trim()) return null;
+      if (!isSessionMode(record.mode)) return null;
+      if (!isPlausibleSessionTimestamp(record.startedAt, now)) return null;
+
+      const completedMs =
+        typeof record.completedMs === "number"
+          ? clampNumber(record.completedMs, 0, MAX_SESSION_DURATION_MS)
+          : 0;
+      const durationMs =
+        typeof record.durationMs === "number"
+          ? clampNumber(record.durationMs, 0, MAX_SESSION_DURATION_MS)
+          : completedMs;
+      const endedAt = isPlausibleSessionTimestamp(record.endedAt, now)
+        ? Math.max(record.startedAt, record.endedAt)
+        : Math.max(record.startedAt, record.startedAt + completedMs);
+
+      return {
+        id: record.id,
+        mode: record.mode,
+        durationMs,
+        completedMs,
+        startedAt: record.startedAt,
+        endedAt: Math.min(endedAt, now + MAX_SESSION_FUTURE_DRIFT_MS),
+        completed: record.completed === true && completedMs > 0,
+        pomodoroSessions:
+          typeof record.pomodoroSessions === "number" &&
+          Number.isInteger(record.pomodoroSessions)
+            ? clampNumber(record.pomodoroSessions, 0, 100)
+            : undefined,
+        customPresetName:
+          typeof record.customPresetName === "string"
+            ? record.customPresetName.trim().slice(0, 40) || undefined
+            : undefined,
+      };
+    })
+    .filter((record): record is SessionRecord => Boolean(record))
+    .sort((a, b) => b.startedAt - a.startedAt)
     .slice(0, MAX_SESSION_RECORDS);
 }
 
@@ -574,11 +632,12 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
           .map(sanitizeCustomPreset)
           .slice(0, MAX_CUSTOM_PRESETS);
         const loadedUnlockedSet = new Set<string>(loadedUnlocked);
+        const sessionsChanged =
+          JSON.stringify(boundedSessions) !== JSON.stringify(loadedSessions);
         setSessions(boundedSessions);
         setUnlockedIds(loadedUnlockedSet);
         setCustomPresets(boundedPresets);
-        if (boundedSessions.length !== loadedSessions.length)
-          await saveSessions(boundedSessions);
+        if (sessionsChanged) await saveSessions(boundedSessions);
         if (boundedPresets.length !== loadedPresets.length)
           await setJson(PRESETS_KEY, boundedPresets);
         if (parsedActive) {
