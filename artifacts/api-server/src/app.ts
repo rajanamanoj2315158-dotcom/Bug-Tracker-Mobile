@@ -9,15 +9,34 @@ import { apiLimiter, authLimiter } from "./middleware/rateLimit";
 import { applySecurityHeaders } from "./middleware/security";
 
 const app: Express = express();
-const allowedOrigins = [
+const localDevOrigins = [
   "http://localhost:8080",
   "http://localhost:8081",
   "http://localhost:18115",
   "http://127.0.0.1:8080",
   "http://127.0.0.1:8081",
   "http://127.0.0.1:18115",
-  env.FRONTEND_URL,
-].filter(Boolean) as string[];
+];
+
+function toOrigin(value: string | undefined) {
+  if (!value) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+const allowedOrigins = new Set(
+  [...(env.NODE_ENV === "production" ? [] : localDevOrigins), env.FRONTEND_URL]
+    .map(toOrigin)
+    .filter((origin): origin is string => Boolean(origin)),
+);
+
+function isAllowedOrigin(origin: string) {
+  const normalized = toOrigin(origin);
+  return normalized !== null && allowedOrigins.has(normalized);
+}
 
 applySecurityHeaders(app);
 
@@ -44,8 +63,9 @@ app.use(
   cors({
     origin(origin, callback) {
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error(`CORS origin not allowed: ${origin}`));
+      if (isAllowedOrigin(origin)) return callback(null, true);
+      logger.warn({ origin }, "CORS origin rejected");
+      return callback(null, false);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

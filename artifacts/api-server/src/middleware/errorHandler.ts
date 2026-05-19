@@ -26,8 +26,12 @@ export function errorHandler(
   err: ErrorWithStatus,
   req: Request,
   res: Response,
-  _next: NextFunction,
+  next: NextFunction,
 ) {
+  if (res.headersSent) {
+    return next(err);
+  }
+
   const status = err.status ?? err.statusCode ?? 500;
   const safeStatus = status >= 400 && status < 600 ? status : 500;
 
