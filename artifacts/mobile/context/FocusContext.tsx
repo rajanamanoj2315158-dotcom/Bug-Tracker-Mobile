@@ -275,33 +275,71 @@ interface PersistedActiveSession extends ActiveSession {
 function restoreActiveSession(
   raw: PersistedActiveSession,
 ): ActiveSession | null {
-  if (typeof raw.startedAt !== "number" || typeof raw.durationMs !== "number")
-    return null;
-  if (typeof raw.remainingMs !== "number" || typeof raw.paused !== "boolean")
-    return null;
-  if (!Number.isFinite(raw.durationMs) || raw.durationMs < 0) return null;
-  if (!Number.isFinite(raw.remainingMs) || raw.remainingMs < 0) return null;
-
   const now = Date.now();
+  if (!isSessionMode(raw.mode)) return null;
+  if (!isPlausibleSessionTimestamp(raw.startedAt, now)) return null;
 
-  if (raw.timerMode === "stopwatch") {
-    const elapsedSinceSave = raw.paused
-      ? 0
-      : Math.max(0, now - (raw.savedAt ?? now));
-    return {
-      ...raw,
-      remainingMs: Math.max(0, raw.remainingMs + elapsedSinceSave),
-    };
+  const timerMode = isTimerMode(raw.timerMode)
+    ? raw.timerMode
+    : raw.mode === "pomodoro"
+      ? "pomodoro"
+      : "countdown";
+  const durationMs = clampNumber(raw.durationMs, 1, MAX_SESSION_DURATION_MS);
+  const paused = raw.paused === true;
+  const baseRemainingMs = clampNumber(
+    raw.remainingMs,
+    0,
+    timerMode === "stopwatch" ? MAX_SESSION_DURATION_MS : durationMs,
+  );
+  const savedAt = isPlausibleSessionTimestamp(raw.savedAt, now)
+    ? raw.savedAt
+    : now;
+  let endsAt =
+    typeof raw.endsAt === "number" && Number.isFinite(raw.endsAt)
+      ? raw.endsAt
+      : undefined;
+  let remainingMs = baseRemainingMs;
+
+  if (timerMode === "stopwatch") {
+    const elapsedSinceSave = raw.paused ? 0 : Math.max(0, now - savedAt);
+    remainingMs = clampNumber(
+      baseRemainingMs + elapsedSinceSave,
+      0,
+      MAX_SESSION_DURATION_MS,
+    );
+    endsAt = undefined;
+  } else if (paused) {
+    remainingMs = Math.min(baseRemainingMs, durationMs);
+  } else {
+    endsAt = isPlausibleActiveEndTimestamp(endsAt, now)
+      ? endsAt
+      : now + baseRemainingMs;
+    remainingMs = clampNumber(endsAt - now, 0, durationMs);
+    if (remainingMs <= 0) return null;
   }
 
-  const remainingMs = raw.paused
-    ? raw.remainingMs
-    : raw.endsAt
-      ? Math.max(0, raw.endsAt - now)
-      : raw.remainingMs;
+  const pomodoroState =
+    timerMode === "pomodoro" || timerMode === "interval"
+      ? sanitizePomodoroState(raw.pomodoroState)
+      : undefined;
 
-  if (!raw.paused && remainingMs <= 0) return null;
-  return { ...raw, remainingMs };
+  return {
+    mode: raw.mode,
+    durationMs,
+    startedAt: raw.startedAt,
+    endsAt,
+    remainingMs,
+    paused,
+    timerMode,
+    pomodoroState,
+    customPresetId: sanitizeOptionalText(raw.customPresetId, 64),
+    customPresetName: sanitizeOptionalText(raw.customPresetName, 40),
+    customColor: sanitizeColor(raw.customColor),
+    customWorkMs: sanitizeOptionalMs(raw.customWorkMs),
+    customBreakMs: sanitizeOptionalMs(raw.customBreakMs, 0),
+    autoRepeat: raw.autoRepeat === true,
+    strictLockActive: raw.strictLockActive === true,
+  };
 }
 
 function isExpiredActiveSession(raw: PersistedActiveSession) {
@@ -311,6 +349,7 @@ function isExpiredActiveSession(raw: PersistedActiveSession) {
     isOneShotTimer &&
     !raw.paused &&
     typeof raw.endsAt === "number" &&
+    Number.isFinite(raw.endsAt) &&
     raw.endsAt <= Date.now()
   );
 }
@@ -404,6 +443,12 @@ const SESSION_MODES = new Set<SessionMode>([
   "founder",
   "custom",
 ]);
+const TIMER_MODES = new Set<TimerMode>([
+  "countdown",
+  "pomodoro",
+  "stopwatch",
+  "interval",
+]);
 
 function isPersistedActiveSession(
   value: unknown,
@@ -431,6 +476,52 @@ function clampNumber(value: number, min: number, max: number) {
 
 function isSessionMode(value: unknown): value is SessionMode {
   return typeof value === "string" && SESSION_MODES.has(value as SessionMode);
+}
+
+function isTimerMode(value: unknown): value is TimerMode {
+  return typeof value === "string" && TIMER_MODES.has(value as TimerMode);
+}
+
+function sanitizeOptionalText(value: unknown, maxLength: number) {
+  return typeof value === "string"
+    ? value.trim().slice(0, maxLength) || undefined
+    : undefined;
+}
+
+function sanitizeColor(value: unknown) {
+  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)
+    ? value
+    : undefined;
+}
+
+function sanitizeOptionalMs(value: unknown, min = 1) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? clampNumber(value, min, MAX_SESSION_DURATION_MS)
+    : undefined;
+}
+
+function sanitizePomodoroState(value: unknown): PomodoroState {
+  if (!isRecord(value)) {
+    return { cycle: 1, phase: "work", completedCycles: 0 };
+  }
+
+  const phase =
+    value.phase === "short_break" || value.phase === "long_break"
+      ? value.phase
+      : "work";
+
+  return {
+    cycle:
+      typeof value.cycle === "number" && Number.isInteger(value.cycle)
+        ? clampNumber(value.cycle, 1, 100)
+        : 1,
+    phase,
+    completedCycles:
+      typeof value.completedCycles === "number" &&
+      Number.isInteger(value.completedCycles)
+        ? clampNumber(value.completedCycles, 0, 100)
+        : 0,
+  };
 }
 
 function sanitizeCustomPreset(preset: Partial<CustomPreset>): CustomPreset {
@@ -479,6 +570,18 @@ function isPlausibleSessionTimestamp(
     Number.isFinite(value) &&
     value >= MIN_SESSION_TIMESTAMP &&
     value <= now + MAX_SESSION_FUTURE_DRIFT_MS
+  );
+}
+
+function isPlausibleActiveEndTimestamp(
+  value: unknown,
+  now: number,
+): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= MIN_SESSION_TIMESTAMP &&
+    value <= now + MAX_SESSION_DURATION_MS
   );
 }
 
