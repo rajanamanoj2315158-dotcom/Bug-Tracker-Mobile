@@ -15,7 +15,8 @@ const path = require("path");
 
 const STATIC_ROOT = path.resolve(__dirname, "..", "static-build");
 const TEMPLATE_PATH = path.resolve(__dirname, "templates", "landing-page.html");
-const basePath = (process.env.BASE_PATH || "/").replace(/\/+$/, "");
+const SAFE_HOST_RE = /^[a-z0-9.-]+(?::\d{1,5})?$/i;
+const basePath = normalizeBasePath(process.env.BASE_PATH || "/");
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -34,6 +35,58 @@ const MIME_TYPES = {
   ".otf": "font/otf",
   ".map": "application/json",
 };
+
+function normalizeBasePath(value) {
+  const cleaned = String(value || "/").trim();
+  if (!cleaned || cleaned === "/") return "";
+  return `/${cleaned.replace(/^\/+|\/+$/g, "")}`;
+}
+
+function firstHeaderValue(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return typeof raw === "string" ? raw.split(",")[0].trim() : "";
+}
+
+function getSafeHost(req) {
+  const host =
+    firstHeaderValue(req.headers["x-forwarded-host"]) ||
+    firstHeaderValue(req.headers.host);
+  return SAFE_HOST_RE.test(host) ? host : `localhost:${port}`;
+}
+
+function getSafeProtocol(req) {
+  const proto = firstHeaderValue(
+    req.headers["x-forwarded-proto"],
+  ).toLowerCase();
+  return proto === "http" || proto === "https" ? proto : "https";
+}
+
+function escapeHtml(value) {
+  return String(value).replace(
+    /[&<>"']/g,
+    (ch) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        ch
+      ],
+  );
+}
+
+function resolveStaticPath(urlPath) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(urlPath);
+  } catch {
+    return null;
+  }
+
+  const relativePath = decoded.replace(/^\/+/, "");
+  const filePath = path.resolve(STATIC_ROOT, relativePath);
+  const relativeToRoot = path.relative(STATIC_ROOT, filePath);
+  if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
+    return null;
+  }
+  return filePath;
+}
 
 function getAppName() {
   try {
@@ -66,26 +119,23 @@ function serveManifest(platform, res) {
 }
 
 function serveLandingPage(req, res, landingPageTemplate, appName) {
-  const forwardedProto = req.headers["x-forwarded-proto"];
-  const protocol = forwardedProto || "https";
-  const host = req.headers["x-forwarded-host"] || req.headers["host"];
+  const protocol = getSafeProtocol(req);
+  const host = getSafeHost(req);
   const baseUrl = `${protocol}://${host}`;
   const expsUrl = `${host}`;
 
   const html = landingPageTemplate
     .replace(/BASE_URL_PLACEHOLDER/g, baseUrl)
     .replace(/EXPS_URL_PLACEHOLDER/g, expsUrl)
-    .replace(/APP_NAME_PLACEHOLDER/g, appName);
+    .replace(/APP_NAME_PLACEHOLDER/g, escapeHtml(appName));
 
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   res.end(html);
 }
 
 function serveStaticFile(urlPath, res) {
-  const safePath = path.normalize(urlPath).replace(/^(\.\.(\/|\\|$))+/, "");
-  const filePath = path.join(STATIC_ROOT, safePath);
-
-  if (!filePath.startsWith(STATIC_ROOT)) {
+  const filePath = resolveStaticPath(urlPath);
+  if (!filePath) {
     res.writeHead(403);
     res.end("Forbidden");
     return;
@@ -100,7 +150,13 @@ function serveStaticFile(urlPath, res) {
   const ext = path.extname(filePath).toLowerCase();
   const contentType = MIME_TYPES[ext] || "application/octet-stream";
   const content = fs.readFileSync(filePath);
-  res.writeHead(200, { "content-type": contentType });
+  const cacheControl = urlPath.includes("/_expo/static/")
+    ? "public, max-age=31536000, immutable"
+    : "no-cache";
+  res.writeHead(200, {
+    "content-type": contentType,
+    "cache-control": cacheControl,
+  });
   res.end(content);
 }
 
@@ -108,7 +164,14 @@ const landingPageTemplate = fs.readFileSync(TEMPLATE_PATH, "utf-8");
 const appName = getAppName();
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url || "/", `http://${req.headers.host}`);
+  let url;
+  try {
+    url = new URL(req.url || "/", `http://${getSafeHost(req)}`);
+  } catch {
+    res.writeHead(400);
+    res.end("Bad Request");
+    return;
+  }
   let pathname = url.pathname;
 
   if (basePath && pathname.startsWith(basePath)) {
@@ -129,7 +192,11 @@ const server = http.createServer((req, res) => {
   serveStaticFile(pathname, res);
 });
 
-const port = parseInt(process.env.PORT || "3000", 10);
+const requestedPort = Number.parseInt(process.env.PORT || "3000", 10);
+const port =
+  Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65535
+    ? requestedPort
+    : 3000;
 server.listen(port, "0.0.0.0", () => {
   console.log(`Serving static Expo build on port ${port}`);
 });

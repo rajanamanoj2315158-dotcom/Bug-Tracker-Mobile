@@ -16,11 +16,51 @@ function findWorkspaceRoot(startDir) {
     }
     dir = path.dirname(dir);
   }
-  throw new Error("Could not find workspace root (no pnpm-workspace.yaml found)");
+  throw new Error(
+    "Could not find workspace root (no pnpm-workspace.yaml found)",
+  );
 }
 
 const workspaceRoot = findWorkspaceRoot(projectRoot);
-const basePath = (process.env.BASE_PATH || "/").replace(/\/+$/, "");
+const basePath = normalizeBasePath(process.env.BASE_PATH || "/");
+
+function normalizeBasePath(value) {
+  const cleaned = String(value || "/").trim();
+  if (!cleaned || cleaned === "/") return "";
+  return `/${cleaned.replace(/^\/+|\/+$/g, "")}`;
+}
+
+function normalizeAssetSourcePath(value) {
+  const normalized = path.posix.normalize(String(value).replace(/\\/g, "/"));
+  if (!normalized || normalized.startsWith("/")) {
+    throw new Error(`Unsafe asset path: ${value}`);
+  }
+  return normalized;
+}
+
+function normalizeAssetOutputPath(value) {
+  const normalized = path.posix
+    .normalize(String(value).replace(/\\/g, "/"))
+    .replace(/^(\.\.\/)+/, "")
+    .replace(/^\/+/, "");
+  if (!normalized || normalized === ".." || normalized.startsWith("../")) {
+    throw new Error(`Unsafe asset output path: ${value}`);
+  }
+  return normalized;
+}
+
+function normalizeAssetFilename(value) {
+  const filename = path.posix.basename(String(value));
+  if (
+    !filename ||
+    filename !== value ||
+    filename === "." ||
+    filename === ".."
+  ) {
+    throw new Error(`Unsafe asset filename: ${value}`);
+  }
+  return filename;
+}
 
 function exitWithError(message) {
   console.error(message);
@@ -154,14 +194,7 @@ async function startMetro(expoPublicDomain, expoPublicReplId) {
 
   metroProcess = spawn(
     "pnpm",
-    [
-      "exec",
-      "expo",
-      "start",
-      "--no-dev",
-      "--minify",
-      "--localhost",
-    ],
+    ["exec", "expo", "start", "--no-dev", "--minify", "--localhost"],
     {
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
@@ -211,6 +244,9 @@ async function downloadFile(url, outputPath) {
     }
 
     const file = fs.createWriteStream(outputPath);
+    if (!response.body) {
+      throw new Error(`Response body missing for ${url}`);
+    }
     await pipeline(Readable.fromWeb(response.body), file);
 
     const fileSize = fs.statSync(outputPath).size;
@@ -234,7 +270,12 @@ async function downloadFile(url, outputPath) {
 }
 
 async function downloadBundle(platform, timestamp) {
-  const entryPath = path.resolve(projectRoot, "node_modules", "expo-router", "entry");
+  const entryPath = path.resolve(
+    projectRoot,
+    "node_modules",
+    "expo-router",
+    "entry",
+  );
   const bundlePath = path.relative(workspaceRoot, entryPath);
   const url = new URL(`http://localhost:8081/${bundlePath}.bundle`);
   url.searchParams.set("platform", platform);
@@ -314,11 +355,27 @@ function extractAssets(timestamp) {
   const staticBuild = path.join(projectRoot, "static-build");
   const bundles = {
     ios: fs.readFileSync(
-      path.join(staticBuild, timestamp, "_expo", "static", "js", "ios", "bundle.js"),
+      path.join(
+        staticBuild,
+        timestamp,
+        "_expo",
+        "static",
+        "js",
+        "ios",
+        "bundle.js",
+      ),
       "utf-8",
     ),
     android: fs.readFileSync(
-      path.join(staticBuild, timestamp, "_expo", "static", "js", "android", "bundle.js"),
+      path.join(
+        staticBuild,
+        timestamp,
+        "_expo",
+        "static",
+        "js",
+        "android",
+        "bundle.js",
+      ),
       "utf-8",
     ),
   };
@@ -330,7 +387,7 @@ function extractAssets(timestamp) {
   const extractFromBundle = (bundle, platform) => {
     for (const match of bundle.matchAll(assetPattern)) {
       const originalPath = match[1];
-      const filename = match[3] + "." + match[4];
+      const filename = normalizeAssetFilename(match[3] + "." + match[4]);
 
       const tempUrl = new URL(`http://localhost:8081${originalPath}`);
       const unstablePath = tempUrl.searchParams.get("unstable_path");
@@ -340,14 +397,17 @@ function extractAssets(timestamp) {
       }
 
       const decodedPath = decodeURIComponent(unstablePath);
-      const key = path.posix.join(decodedPath, filename);
+      const sourcePath = normalizeAssetSourcePath(decodedPath);
+      const relativePath = normalizeAssetOutputPath(decodedPath);
+      const key = path.posix.join(relativePath, filename);
 
       if (!assetsMap.has(key)) {
         const asset = {
-          url: path.posix.join("/", decodedPath, filename),
+          url: path.posix.join("/", relativePath, filename),
           originalPath: originalPath,
           filename: filename,
-          relativePath: decodedPath,
+          relativePath,
+          sourcePath,
           hash: match[2],
           platforms: new Set(),
         };
@@ -381,7 +441,9 @@ async function downloadAssets(assets, timestamp) {
       throw new Error(`Asset missing unstable_path: ${asset.originalPath}`);
     }
 
-    const decodedPath = decodeURIComponent(unstablePath);
+    const decodedPath = normalizeAssetSourcePath(
+      decodeURIComponent(unstablePath),
+    );
 
     const outputDir = path.join(
       projectRoot,
@@ -397,10 +459,17 @@ async function downloadAssets(assets, timestamp) {
 
     try {
       const candidates = [
-        path.join(projectRoot, decodedPath, asset.filename),
-        path.join(workspaceRoot, decodedPath, asset.filename),
+        path.resolve(projectRoot, decodedPath, asset.filename),
+        path.resolve(workspaceRoot, decodedPath, asset.filename),
       ];
-      const found = candidates.find((p) => fs.existsSync(p));
+      const found = candidates.find((p) => {
+        const relative = path.relative(workspaceRoot, p);
+        return (
+          !relative.startsWith("..") &&
+          !path.isAbsolute(relative) &&
+          fs.existsSync(p)
+        );
+      });
       if (!found) {
         throw new Error(`Asset not found on disk: ${asset.filename}`);
       }
@@ -456,7 +525,9 @@ function updateBundleUrls(timestamp, baseUrl) {
           );
         }
 
-        const decodedPath = decodeURIComponent(unstablePath);
+        const decodedPath = normalizeAssetOutputPath(
+          decodeURIComponent(unstablePath),
+        );
         return `httpServerLocation:"${baseUrl}${basePath}/${timestamp}/_expo/static/js/${decodedPath}"`;
       },
     );
