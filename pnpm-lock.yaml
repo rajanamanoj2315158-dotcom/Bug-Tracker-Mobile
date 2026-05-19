@@ -228,6 +228,9 @@ importers:
       '@react-native-community/netinfo':
         specifier: ^12.0.1
         version: 12.0.1(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+      expo-battery:
+        specifier: ^55.0.13
+        version: 55.0.13(expo@54.0.34)(react@19.1.0)
     devDependencies:
       '@babel/core':
         specifier: ^7.25.2
@@ -3333,6 +3336,12 @@ packages:
       expo: '*'
       react: '*'
       react-native: '*'
+
+  expo-battery@55.0.13:
+    resolution: {integrity: sha512-yt2BZCs76aeM9UPbIf8pAGvZJ6AQ7UQ8qjiQcciU3o3q512ZTgsIWObfOqZlTy/abzU2njHW6OikWbtQbeyeZg==}
+    peerDependencies:
+      expo: '*'
+      react: '*'
 
   expo-blur@15.0.8:
     resolution: {integrity: sha512-rWyE1NBRZEu9WD+X+5l7gyPRszw7n12cW3IRNAb5i6KFzaBp8cxqT5oeaphJapqURvcqhkOZn2k5EtBSbsuU7w==}
@@ -9158,6 +9167,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
       - typescript
+
+  expo-battery@55.0.13(expo@54.0.34)(react@19.1.0):
+    dependencies:
+      expo: 54.0.34(@babel/core@7.29.0)(@expo/metro-runtime@6.1.2)(expo-router@6.0.23)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(typescript@5.9.2)
+      react: 19.1.0
 
   expo-blur@15.0.8(expo@54.0.34)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0):
     dependencies:

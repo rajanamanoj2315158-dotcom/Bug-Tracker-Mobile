@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { AppState } from "react-native";
 
 export type AppCategory = "social" | "entertainment" | "productive" | "gaming" | "communication" | "news" | "other";
 export type BlockTrigger =
@@ -57,6 +58,11 @@ export interface StartSessionParams {
   blockedApp?: string;
 }
 
+interface StrictReliabilityState {
+  interruptionCount: number;
+  lastInterruptionAt: number | null;
+}
+
 const DEFAULT_BLOCK_CONFIG = (): AppBlockConfig => ({
   triggers: [], startTime: "09:00", endTime: "22:00", days: [1, 2, 3, 4, 5], dailyLimitMin: 30, emergencyAllowed: false, permanent: false,
 });
@@ -78,10 +84,12 @@ const TIMETABLE_KEY = "fs_timetable_v2";
 const SETTINGS_KEY = "fs_settings_v2";
 const DISTRACTION_KEY = "fs_distraction_log";
 const STRICT_SESSION_KEY = "@strict_session_v2";
+const STRICT_RELIABILITY_KEY = "fs_strict_reliability_v1";
 const SCHEMA_VERSION = 2;
 const MAX_LOG_ENTRIES = 500;
 const EMERGENCY_COOLDOWN_MS = 30 * 60 * 1000;
 const MANUAL_STRICT_DURATION_MS = 90 * 60 * 1000;
+const SUSPENSION_RISK_MS = 2 * 60 * 1000;
 
 interface UsageContextValue {
   apps: AppEntry[];
@@ -98,6 +106,7 @@ interface UsageContextValue {
   categoryColors: typeof CATEGORY_COLORS;
   disciplineScore: number;
   todayUsageByCategory: Record<AppCategory, number>;
+  strictReliability: StrictReliabilityState;
   addApp: (app: AppEntry) => void;
   removeApp: (name: string) => void;
   toggleAppBlocked: (name: string) => void;
@@ -129,6 +138,27 @@ function createWriteQueue() {
   return { enqueue(task: () => Promise<void>) { tail = tail.then(task, task); return tail; } };
 }
 
+function timeToMinutes(value: string) {
+  const [h, m] = value.split(":").map((n) => Number(n));
+  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+  return Math.min(1439, Math.max(0, h * 60 + m));
+}
+
+function toRanges(startTime: string, endTime: string) {
+  const start = timeToMinutes(startTime);
+  const end = timeToMinutes(endTime);
+  if (start === end) return [{ start: 0, end: 1440 }];
+  if (end > start) return [{ start, end }];
+  return [{ start, end: 1440 }, { start: 0, end }];
+}
+
+function overlaps(a: TimetableSlot, b: TimetableSlot) {
+  if (a.dayOfWeek !== b.dayOfWeek) return false;
+  const aRanges = toRanges(a.startTime, a.endTime);
+  const bRanges = toRanges(b.startTime, b.endTime);
+  return aRanges.some((ar) => bRanges.some((br) => ar.start < br.end && br.start < ar.end));
+}
+
 export function UsageProvider({ children }: { children: React.ReactNode }) {
   const [apps, setApps] = useState<AppEntry[]>(DEFAULT_APPS);
   const [blockRules, setBlockRules] = useState<BlockRule[]>([]);
@@ -140,7 +170,10 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   const [emergencyUnlock, setEmergencyUnlock] = useState<EmergencyUnlock | null>(null);
   const [lockModeEnabled, setLockModeEnabled] = useState(false);
   const [activeSession, setActiveSession] = useState<StrictModeSession | null>(null);
+  const [strictReliability, setStrictReliability] = useState<StrictReliabilityState>({ interruptionCount: 0, lastInterruptionAt: null });
   const queue = useRef(createWriteQueue());
+  const appStateRef = useRef(AppState.currentState);
+  const backgroundAtRef = useRef<number | null>(null);
 
   const strictModeEnabled = activeSession !== null;
 
@@ -168,6 +201,16 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
             setActiveSession(session);
           } else {
             await AsyncStorage.removeItem(STRICT_SESSION_KEY);
+          }
+        }
+        const reliabilityRaw = await AsyncStorage.getItem(STRICT_RELIABILITY_KEY);
+        if (reliabilityRaw) {
+          const parsed = JSON.parse(reliabilityRaw);
+          if (typeof parsed?.interruptionCount === "number") {
+            setStrictReliability({
+              interruptionCount: parsed.interruptionCount,
+              lastInterruptionAt: typeof parsed.lastInterruptionAt === "number" ? parsed.lastInterruptionAt : null,
+            });
           }
         }
       } catch {}
@@ -282,7 +325,7 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   const addTimetableSlot = useCallback((slot: Omit<TimetableSlot, "id">) => {
     const item: TimetableSlot = { ...slot, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
     setTimetable((prev) => {
-      const next = [...prev, item];
+      const next = [...prev.filter((existing) => !overlaps(existing, item)), item];
       save(TIMETABLE_KEY, next);
       return next;
     });
@@ -384,6 +427,34 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
     queue.current.enqueue(async () => { try { await AsyncStorage.removeItem(DISTRACTION_KEY); } catch {} });
   }, []);
 
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      const prev = appStateRef.current;
+      appStateRef.current = nextState;
+
+      if ((nextState === "background" || nextState === "inactive") && prev === "active") {
+        backgroundAtRef.current = Date.now();
+        return;
+      }
+
+      if (nextState === "active" && backgroundAtRef.current && strictModeEnabled) {
+        const suspendedFor = Date.now() - backgroundAtRef.current;
+        backgroundAtRef.current = null;
+        if (suspendedFor >= SUSPENSION_RISK_MS) {
+          const nextReliability: StrictReliabilityState = {
+            interruptionCount: strictReliability.interruptionCount + 1,
+            lastInterruptionAt: Date.now(),
+          };
+          setStrictReliability(nextReliability);
+          save(STRICT_RELIABILITY_KEY, nextReliability);
+          logDistractionAttempt("System suspension risk", activeSession?.mode);
+        }
+      }
+    });
+
+    return () => sub.remove();
+  }, [activeSession?.mode, logDistractionAttempt, save, strictModeEnabled, strictReliability]);
+
   const blockedApps = useMemo(() => apps.filter((a) => a.blocked), [apps]);
   const todayDistractionCount = useMemo(() => {
     const start = new Date(); start.setHours(0, 0, 0, 0);
@@ -405,7 +476,7 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   const value: UsageContextValue = {
     apps, blockRules, whitelist, timetable, distractionLog, emergencyUnlock,
     lockModeEnabled, strictModeEnabled, activeSession, todayDistractionCount,
-    blockedApps, categoryColors: CATEGORY_COLORS, disciplineScore, todayUsageByCategory,
+    blockedApps, categoryColors: CATEGORY_COLORS, disciplineScore, todayUsageByCategory, strictReliability,
     addApp, removeApp, toggleAppBlocked, updateAppConfig, addBlockRule, removeBlockRule, toggleBlockRule,
     addToWhitelist, removeFromWhitelist, addTimetableSlot, removeTimetableSlot, logDistractionAttempt,
     triggerEmergencyUnlock, setLockMode, setStrictMode, defaultBlockConfig: DEFAULT_BLOCK_CONFIG,

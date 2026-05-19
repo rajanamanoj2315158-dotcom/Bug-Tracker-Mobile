@@ -1,9 +1,11 @@
 import { Feather } from "@expo/vector-icons";
+import * as Battery from "expo-battery";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -509,6 +511,7 @@ export default function BlockScreen() {
     lockModeEnabled, strictModeEnabled, setLockMode, setStrictMode,
     emergencyUnlock, triggerEmergencyUnlock,
     blockedApps, categoryColors, disciplineScore,
+    strictReliability,
     defaultBlockConfig,
   } = useUsage();
 
@@ -519,6 +522,7 @@ export default function BlockScreen() {
   const [ruleInput, setRuleInput] = useState("");
   const [ruleType, setRuleType] = useState<"website" | "keyword">("website");
   const [addAppInput, setAddAppInput] = useState("");
+  const [lowPowerMode, setLowPowerMode] = useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const styles = makeStyles(colors);
@@ -532,6 +536,20 @@ export default function BlockScreen() {
   const cooldownMs = emergencyUnlock
     ? Math.max(0, emergencyUnlock.cooldownMs - (Date.now() - emergencyUnlock.unlockedAt))
     : 0;
+
+  useEffect(() => {
+    let mounted = true;
+    Battery.isLowPowerModeEnabledAsync().then((enabled) => {
+      if (mounted) setLowPowerMode(enabled);
+    }).catch(() => {});
+    const sub = Battery.addLowPowerModeListener(({ lowPowerMode: enabled }) => {
+      setLowPowerMode(enabled);
+    });
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
 
   function handleStrictMode(v: boolean) {
     if (v) {
@@ -806,6 +824,29 @@ export default function BlockScreen() {
         {/* ── STRICT TAB ── */}
         {activeTab === "strict" && (
           <View style={styles.tabContent}>
+            {(lowPowerMode || strictReliability.interruptionCount > 0) && (
+              <View style={[styles.infoBox, { borderColor: colors.warning + "55", backgroundColor: colors.warning + "10" }]}>
+                <Feather name="alert-triangle" size={13} color={colors.warning} />
+                <Text style={styles.infoBoxText}>
+                  {lowPowerMode
+                    ? "Battery Saver is ON. Android may pause strict-mode protection in background."
+                    : `Detected ${strictReliability.interruptionCount} background interruption${strictReliability.interruptionCount > 1 ? "s" : ""} during strict mode.`}
+                </Text>
+              </View>
+            )}
+
+            {(lowPowerMode || strictReliability.interruptionCount > 0) && (
+              <Pressable
+                style={[styles.emergencyRow, { borderColor: colors.warning + "44" }]}
+                onPress={() => Linking.openSettings()}
+              >
+                <Feather name="settings" size={13} color={colors.warning} />
+                <Text style={[styles.emergencyText, { color: colors.warning }]}>
+                  Open Settings to disable battery restrictions for Focus Shield
+                </Text>
+              </Pressable>
+            )}
+
             {/* Strict mode detail */}
             <View style={[styles.card, { padding: 16, gap: 16 }]}>
               <View style={styles.strictDetailRow}>
