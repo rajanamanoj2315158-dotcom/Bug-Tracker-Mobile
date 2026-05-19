@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { Habit, useHabits } from "@/context/HabitContext";
 import { useFocus } from "@/context/FocusContext";
+import { TimetableSlot, useUsage } from "@/context/UsageContext";
 
 type Tab = "habits" | "goals" | "challenges" | "timetable";
 
@@ -51,11 +52,22 @@ const TYPE_COLORS: Record<string, string> = {
   free: "#64748b",
 };
 
+function getLocalDayKey(ts: number) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function sortTimetable(a: TimetableSlot, b: TimetableSlot) {
+  if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
+  return a.startTime.localeCompare(b.startTime);
+}
+
 export default function MoreScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { todayHabits, habits, goals, challenges, addHabit, removeHabit, toggleHabitToday, addGoal, removeGoal, toggleGoal, startChallenge, markChallengeDay, habitTemplates, completedHabitsToday, completedGoalsToday, todayGoals } = useHabits();
   const { streak, productivityScore } = useFocus();
+  const { timetable, addTimetableSlot, removeTimetableSlot } = useUsage();
 
   const [activeTab, setActiveTab] = useState<Tab>("habits");
   const [showAddHabit, setShowAddHabit] = useState(false);
@@ -65,7 +77,7 @@ export default function MoreScreen() {
   const [goalInput, setGoalInput] = useState("");
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
-  const today = new Date().toISOString().split("T")[0];
+  const today = getLocalDayKey(Date.now());
   const styles = makeStyles(colors);
 
   function handleAddHabit() {
@@ -81,6 +93,30 @@ export default function MoreScreen() {
     addGoal(goalInput.trim());
     setGoalInput("");
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }
+
+  function addPresetToTimetable(preset: typeof TIMETABLE_PRESETS[number]) {
+    preset.days.forEach((dayOfWeek) => {
+      addTimetableSlot({
+        dayOfWeek,
+        startTime: preset.startTime,
+        endTime: preset.endTime,
+        label: preset.label,
+        type: preset.type,
+      });
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }
+
+  function addTodayFocusBlock() {
+    addTimetableSlot({
+      dayOfWeek: new Date().getDay(),
+      startTime: "09:00",
+      endTime: "10:00",
+      label: "Focus Block",
+      type: "focus",
+    });
+    Haptics.selectionAsync();
   }
 
   return (
@@ -369,7 +405,11 @@ export default function MoreScreen() {
             {TIMETABLE_PRESETS.map((preset, i) => {
               const color = TYPE_COLORS[preset.type] ?? colors.primary;
               return (
-                <View key={i} style={styles.timetableCard}>
+                <Pressable
+                  key={i}
+                  style={({ pressed }) => [styles.timetableCard, pressed && { opacity: 0.75 }]}
+                  onPress={() => addPresetToTimetable(preset)}
+                >
                   <View style={[styles.timetableBar, { backgroundColor: color }]} />
                   <View style={[styles.timetableIcon, { backgroundColor: color + "20" }]}>
                     <Feather
@@ -388,12 +428,50 @@ export default function MoreScreen() {
                   <View style={[styles.typeBadge, { backgroundColor: color + "22" }]}>
                     <Text style={[styles.typeBadgeText, { color }]}>{preset.type}</Text>
                   </View>
-                </View>
+                </Pressable>
               );
             })}
-            <Pressable style={styles.addBtn}>
+
+            <Text style={styles.subsectionTitle}>Active Schedule</Text>
+            {timetable.length === 0 ? (
+              <View style={styles.empty}>
+                <Feather name="calendar" size={28} color={colors.mutedForeground} />
+                <Text style={styles.emptyTitle}>No time blocks yet</Text>
+                <Text style={styles.emptySub}>Tap a template or add a focus block for today</Text>
+              </View>
+            ) : (
+              [...timetable].sort(sortTimetable).map((slot) => {
+                const color = TYPE_COLORS[slot.type] ?? colors.primary;
+                return (
+                  <Pressable
+                    key={slot.id}
+                    style={({ pressed }) => [styles.timetableCard, pressed && { opacity: 0.75 }]}
+                    onLongPress={() => {
+                      Alert.alert("Remove Time Block", `Remove "${slot.label}"?`, [
+                        { text: "Cancel", style: "cancel" },
+                        { text: "Remove", style: "destructive", onPress: () => removeTimetableSlot(slot.id) },
+                      ]);
+                    }}
+                  >
+                    <View style={[styles.timetableBar, { backgroundColor: color }]} />
+                    <View style={[styles.timetableIcon, { backgroundColor: color + "20" }]}>
+                      <Feather name={slot.type === "sleep" ? "moon" : slot.type === "focus" ? "target" : slot.type === "study" ? "book-open" : "clock"} size={16} color={color} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.timetableLabel}>{slot.label}</Text>
+                      <Text style={styles.timetableTime}>{DAY_NAMES[slot.dayOfWeek]} · {slot.startTime} – {slot.endTime}</Text>
+                    </View>
+                    <View style={[styles.typeBadge, { backgroundColor: color + "22" }]}>
+                      <Text style={[styles.typeBadgeText, { color }]}>{slot.type}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })
+            )}
+
+            <Pressable style={styles.addBtn} onPress={addTodayFocusBlock}>
               <Feather name="plus" size={16} color={colors.primary} />
-              <Text style={styles.addBtnText}>Add Time Block</Text>
+              <Text style={styles.addBtnText}>Add Today Focus Block</Text>
             </Pressable>
           </View>
         )}

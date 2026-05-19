@@ -83,6 +83,9 @@ const HabitContext = createContext<HabitContextValue | null>(null);
 const HABITS_KEY = "fs_habits_v2";
 const GOALS_KEY = "fs_goals_v2";
 const CHALLENGES_KEY = "fs_challenges_v2";
+const MAX_HABIT_NAME_LENGTH = 60;
+const MAX_GOAL_TEXT_LENGTH = 120;
+const MAX_DAILY_GOALS = 10;
 
 function createDefaultChallenges(): Challenge[] {
   return PREDEFINED_CHALLENGES.map((ch) => ({
@@ -128,13 +131,16 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addHabit = useCallback((name: string, icon: string, category: Habit["category"]) => {
+    const safeName = name.trim().slice(0, MAX_HABIT_NAME_LENGTH);
+    if (!safeName) return;
     const habit: Habit = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name, icon, category,
+      name: safeName, icon, category,
       completedDates: [],
       createdAt: Date.now(),
     };
     setHabits((prev) => {
+      if (prev.some((h) => h.name.toLowerCase() === safeName.toLowerCase())) return prev;
       const next = [...prev, habit];
       saveHabits(next);
       return next;
@@ -168,13 +174,18 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
   }, [saveHabits]);
 
   const addGoal = useCallback((text: string) => {
+    const safeText = text.trim().slice(0, MAX_GOAL_TEXT_LENGTH);
+    if (!safeText) return;
+    const today = getDayKey(Date.now());
     const goal: DailyGoal = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      text,
-      date: getDayKey(Date.now()),
+      text: safeText,
+      date: today,
       completed: false,
     };
     setGoals((prev) => {
+      const todayGoalCount = prev.filter((g) => g.date === today).length;
+      if (todayGoalCount >= MAX_DAILY_GOALS) return prev;
       const next = [...prev, goal];
       saveGoals(next);
       return next;
@@ -200,7 +211,7 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
   const startChallenge = useCallback((id: string) => {
     setChallenges((prev) => {
       const next = prev.map((c) =>
-        c.id === id ? { ...c, active: true, startedAt: Date.now(), completedDays: [] } : c
+        c.id === id && !c.active ? { ...c, active: true, startedAt: Date.now(), completedDays: [] } : c
       );
       saveChallenges(next);
       return next;
@@ -211,8 +222,10 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
     const today = getDayKey(Date.now());
     setChallenges((prev) => {
       const next = prev.map((c) => {
-        if (c.id !== id || c.completedDays.includes(today)) return c;
-        return { ...c, completedDays: [...c.completedDays, today] };
+        if (c.id !== id || !c.active || c.completedDays.includes(today)) return c;
+        if (c.completedDays.length >= c.targetDays) return { ...c, active: false };
+        const completedDays = [...c.completedDays, today].slice(0, c.targetDays);
+        return { ...c, completedDays, active: completedDays.length < c.targetDays };
       });
       saveChallenges(next);
       return next;
