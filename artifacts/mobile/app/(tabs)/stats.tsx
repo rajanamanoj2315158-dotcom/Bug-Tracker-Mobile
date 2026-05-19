@@ -56,7 +56,12 @@ function WeekChart({ sessions, period }: { sessions: SessionRecord[]; period: Pe
   const now = Date.now();
   const days = period === "week"
     ? Array.from({ length: 7 }, (_, i) => new Date(now - (6 - i) * 86400000))
-    : Array.from({ length: 4 }, (_, i) => ({ weekStart: now - (3 - i) * 7 * 86400000 }));
+    : Array.from({ length: 4 }, (_, i) => {
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - d.getDay() - (3 - i) * 7);
+      return { weekStart: d.getTime() };
+    });
 
   if (period === "week") {
     const dayMs = (days as Date[]).map((d) => {

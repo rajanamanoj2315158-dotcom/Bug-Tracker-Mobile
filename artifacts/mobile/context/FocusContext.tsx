@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { AppState } from "react-native";
 import { useUsage } from "@/context/UsageContext";
 
 export type SessionMode =
@@ -120,6 +121,59 @@ function getDayKey(ts: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function getDayIndex(ts: number) {
+  const d = new Date(ts);
+  return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000);
+}
+
+interface PersistedActiveSession extends ActiveSession {
+  schemaVersion?: number;
+  savedAt?: number;
+}
+
+function restoreActiveSession(raw: PersistedActiveSession): ActiveSession | null {
+  if (typeof raw.startedAt !== "number" || typeof raw.durationMs !== "number") return null;
+  if (typeof raw.remainingMs !== "number" || typeof raw.paused !== "boolean") return null;
+
+  const now = Date.now();
+
+  if (raw.timerMode === "stopwatch") {
+    const elapsedSinceSave = raw.paused ? 0 : Math.max(0, now - (raw.savedAt ?? now));
+    return { ...raw, remainingMs: Math.max(0, raw.remainingMs + elapsedSinceSave) };
+  }
+
+  const remainingMs = raw.paused
+    ? raw.remainingMs
+    : raw.endsAt
+      ? Math.max(0, raw.endsAt - now)
+      : raw.remainingMs;
+
+  if (!raw.paused && remainingMs <= 0) return null;
+  return { ...raw, remainingMs };
+}
+
+function isExpiredActiveSession(raw: PersistedActiveSession) {
+  const isOneShotTimer = raw.timerMode === undefined || raw.timerMode === "countdown";
+  return isOneShotTimer && !raw.paused && typeof raw.endsAt === "number" && raw.endsAt <= Date.now();
+}
+
+function createSessionRecord(session: ActiveSession, completed: boolean, endedAt = Date.now()): SessionRecord | null {
+  const elapsed = Math.max(0, session.durationMs - session.remainingMs);
+  if (elapsed < 10000 && !completed) return null;
+
+  return {
+    id: `${endedAt}-${Math.random().toString(36).slice(2, 8)}`,
+    mode: session.mode,
+    durationMs: session.durationMs,
+    completedMs: completed ? session.durationMs : elapsed,
+    startedAt: session.startedAt,
+    endedAt,
+    completed,
+    pomodoroSessions: session.pomodoroState?.completedCycles,
+    customPresetName: session.customPresetName,
+  };
+}
+
 interface FocusContextValue {
   sessions: SessionRecord[];
   currentSession: ActiveSession | null;
@@ -150,6 +204,8 @@ const FocusContext = createContext<FocusContextValue | null>(null);
 const SESSIONS_KEY = "fs_sessions_v2";
 const ACHIEVEMENTS_KEY = "fs_achievements";
 const PRESETS_KEY = "fs_custom_presets_v1";
+const ACTIVE_SESSION_KEY = "fs_active_session_v2";
+const ACTIVE_SESSION_SCHEMA_VERSION = 2;
 
 export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
@@ -158,25 +214,28 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [customPresets, setCustomPresets] = useState<CustomPreset[]>(DEFAULT_CUSTOM_PRESETS);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastTickRef = useRef<number>(Date.now());
+  const restoredSessionRef = useRef(false);
+  const didHydrateRef = useRef(false);
   const { startStrictSession, endStrictSession } = useUsage();
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [s, a, p] = await Promise.all([
-          AsyncStorage.getItem(SESSIONS_KEY),
-          AsyncStorage.getItem(ACHIEVEMENTS_KEY),
-          AsyncStorage.getItem(PRESETS_KEY),
-        ]);
-        if (s) setSessions(JSON.parse(s));
-        if (a) setUnlockedIds(new Set(JSON.parse(a)));
-        if (p) setCustomPresets(JSON.parse(p));
-      } catch {}
-    })();
-  }, []);
 
   const saveSessions = useCallback(async (s: SessionRecord[]) => {
     try { await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(s)); } catch {}
+  }, []);
+
+  const saveActiveSession = useCallback(async (session: ActiveSession | null) => {
+    try {
+      if (!session) {
+        await AsyncStorage.removeItem(ACTIVE_SESSION_KEY);
+        return;
+      }
+
+      const persisted: PersistedActiveSession = {
+        ...session,
+        schemaVersion: ACTIVE_SESSION_SCHEMA_VERSION,
+        savedAt: Date.now(),
+      };
+      await AsyncStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(persisted));
+    } catch {}
   }, []);
 
   const unlockAchievement = useCallback(async (id: string, prev: Set<string>) => {
@@ -202,24 +261,56 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     setUnlockedIds(unlocked);
   }, [unlockAchievement]);
 
+  useEffect(() => {
+    if (didHydrateRef.current) return;
+    didHydrateRef.current = true;
+
+    (async () => {
+      try {
+        const [s, a, p, active] = await Promise.all([
+          AsyncStorage.getItem(SESSIONS_KEY),
+          AsyncStorage.getItem(ACHIEVEMENTS_KEY),
+          AsyncStorage.getItem(PRESETS_KEY),
+          AsyncStorage.getItem(ACTIVE_SESSION_KEY),
+        ]);
+        const loadedSessions: SessionRecord[] = s ? JSON.parse(s) : [];
+        const loadedUnlocked = new Set<string>(a ? JSON.parse(a) : []);
+        setSessions(loadedSessions);
+        setUnlockedIds(loadedUnlocked);
+        if (p) setCustomPresets(JSON.parse(p));
+        if (active) {
+          const parsed: PersistedActiveSession = JSON.parse(active);
+          const restored = restoreActiveSession(parsed);
+          if (restored) {
+            setCurrentSession(restored);
+            restoredSessionRef.current = !restored.paused;
+          } else if (isExpiredActiveSession(parsed)) {
+            const expiredSession = { ...parsed, remainingMs: 0 };
+            const record = createSessionRecord(expiredSession, true, parsed.endsAt ?? Date.now());
+            const next = record ? [record, ...loadedSessions] : loadedSessions;
+            setSessions(next);
+            await saveSessions(next);
+            await checkAchievements(next, loadedUnlocked);
+            await AsyncStorage.removeItem(ACTIVE_SESSION_KEY);
+            await endStrictSession();
+          } else {
+            await AsyncStorage.removeItem(ACTIVE_SESSION_KEY);
+            await endStrictSession();
+          }
+        }
+      } catch {}
+    })();
+  }, [checkAchievements, endStrictSession, saveSessions]);
+
   const stopTick = useCallback(() => {
     if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
   }, []);
 
+  useEffect(() => () => stopTick(), [stopTick]);
+
   const commitSession = useCallback(async (session: ActiveSession, completed: boolean, allSessions: SessionRecord[]) => {
-    const elapsed = session.durationMs - session.remainingMs;
-    if (elapsed < 10000 && !completed) return allSessions;
-    const record: SessionRecord = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      mode: session.mode,
-      durationMs: session.durationMs,
-      completedMs: completed ? session.durationMs : elapsed,
-      startedAt: session.startedAt,
-      endedAt: Date.now(),
-      completed,
-      pomodoroSessions: session.pomodoroState?.completedCycles,
-      customPresetName: session.customPresetName,
-    };
+    const record = createSessionRecord(session, completed);
+    if (!record) return allSessions;
     const next = [record, ...allSessions];
     await saveSessions(next);
     return next;
@@ -259,26 +350,47 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
               const isLong = newCycles % 4 === 0;
               const updated: ActiveSession = {
                 ...prev,
+                durationMs: isLong ? longMs : shortMs,
                 remainingMs: isLong ? longMs : shortMs,
                 endsAt: Date.now() + (isLong ? longMs : shortMs),
                 pomodoroState: { cycle: ps.cycle + 1, phase: isLong ? "long_break" : "short_break", completedCycles: newCycles },
               };
+              saveActiveSession(updated);
               setTimeout(() => startTick(), 100);
               return updated;
             } else {
-              const back: ActiveSession = { ...prev, remainingMs: workMs, endsAt: Date.now() + workMs, pomodoroState: { ...ps, phase: "work" } };
+              const back: ActiveSession = { ...prev, durationMs: workMs, remainingMs: workMs, endsAt: Date.now() + workMs, pomodoroState: { ...ps, phase: "work" } };
+              saveActiveSession(back);
               setTimeout(() => startTick(), 100);
               return back;
             }
           }
 
           // Interval mode: work → break loop
-          if (prev.timerMode === "interval" && prev.customBreakMs) {
+          if (prev.timerMode === "interval") {
             const phase = prev.pomodoroState?.phase ?? "work";
             const isWork = phase === "work";
-            const nextMs = isWork ? prev.customBreakMs : (prev.customWorkMs ?? POMO_WORK_MS);
+            const nextMs = isWork ? (prev.customBreakMs ?? 0) : (prev.customWorkMs ?? POMO_WORK_MS);
+            if (nextMs <= 0) {
+              const fallbackMs = prev.customWorkMs ?? POMO_WORK_MS;
+              const updated: ActiveSession = {
+                ...prev,
+                durationMs: fallbackMs,
+                remainingMs: fallbackMs,
+                endsAt: Date.now() + fallbackMs,
+                pomodoroState: {
+                  cycle: (prev.pomodoroState?.cycle ?? 1) + 1,
+                  completedCycles: prev.pomodoroState?.completedCycles ?? 0,
+                  phase: "work",
+                },
+              };
+              saveActiveSession(updated);
+              setTimeout(() => startTick(), 100);
+              return updated;
+            }
             const updated: ActiveSession = {
               ...prev,
+              durationMs: nextMs,
               remainingMs: nextMs,
               endsAt: Date.now() + nextMs,
               pomodoroState: {
@@ -287,6 +399,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
                 phase: isWork ? "short_break" : "work",
               },
             };
+            saveActiveSession(updated);
             setTimeout(() => startTick(), 100);
             return updated;
           }
@@ -295,6 +408,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
             commitSession(prev, true, allSessions).then((next) => {
               setSessions(next);
               checkAchievements(next, unlockedIds);
+              saveActiveSession(null);
               endStrictSession();
             });
             return allSessions;
@@ -305,7 +419,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, remainingMs: remaining };
       });
     }, 500);
-  }, [stopTick, commitSession, checkAchievements, unlockedIds, endStrictSession]);
+  }, [stopTick, commitSession, checkAchievements, unlockedIds, saveActiveSession, endStrictSession]);
 
   const startSession = useCallback((mode: SessionMode) => {
     stopTick();
@@ -321,11 +435,12 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       pomodoroState: mode === "pomodoro" ? { cycle: 1, phase: "work", completedCycles: 0 } : undefined,
     };
     setCurrentSession(session);
+    saveActiveSession(session);
     if (mode === "deep" || mode === "monk" || mode === "detox" || mode === "founder") {
       startStrictSession({ durationMs, mode: mode === "deep" ? "deep_work" : "custom", blockedApp: mode });
     }
     setTimeout(() => startTick(), 50);
-  }, [stopTick, startTick, startStrictSession]);
+  }, [stopTick, startTick, startStrictSession, saveActiveSession]);
 
   const startCustomSession = useCallback((preset: CustomPreset) => {
     stopTick();
@@ -349,11 +464,12 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       pomodoroState: isPomodoro ? { cycle: 1, phase: "work", completedCycles: 0 } : undefined,
     };
     setCurrentSession(session);
+    saveActiveSession(session);
     if (preset.strictMode) {
       startStrictSession({ durationMs: workMs, mode: preset.timerMode === "pomodoro" ? "pomodoro" : "custom", blockedApp: preset.name });
     }
     setTimeout(() => startTick(), 50);
-  }, [stopTick, startTick, startStrictSession]);
+  }, [stopTick, startTick, startStrictSession, saveActiveSession]);
 
   const stopSession = useCallback(() => {
     stopTick();
@@ -363,35 +479,62 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         commitSession(prev, false, allSessions).then((next) => {
           setSessions(next);
           checkAchievements(next, unlockedIds);
+          saveActiveSession(null);
           endStrictSession();
         });
         return allSessions;
       });
       return null;
     });
-  }, [stopTick, commitSession, checkAchievements, unlockedIds, endStrictSession]);
+  }, [stopTick, commitSession, checkAchievements, unlockedIds, saveActiveSession, endStrictSession]);
 
   const pauseSession = useCallback(() => {
     stopTick();
-    setCurrentSession((prev) => prev ? { ...prev, paused: true } : prev);
-  }, [stopTick]);
+    setCurrentSession((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, paused: true };
+      saveActiveSession(updated);
+      return updated;
+    });
+  }, [stopTick, saveActiveSession]);
 
   const resumeSession = useCallback(() => {
     setCurrentSession((prev) => {
       if (!prev) return prev;
       setTimeout(() => startTick(), 50);
-      return { ...prev, paused: false, endsAt: prev.timerMode === "stopwatch" ? undefined : Date.now() + prev.remainingMs };
+      const updated = { ...prev, paused: false, endsAt: prev.timerMode === "stopwatch" ? undefined : Date.now() + prev.remainingMs };
+      saveActiveSession(updated);
+      return updated;
     });
-  }, [startTick]);
+  }, [startTick, saveActiveSession]);
 
   const skipPomodoroBreak = useCallback(() => {
     setCurrentSession((prev) => {
       if (!prev?.pomodoroState) return prev;
       if (prev.pomodoroState.phase === "work") return prev;
       const workMs = prev.customWorkMs ?? POMO_WORK_MS;
-      return { ...prev, remainingMs: workMs, endsAt: Date.now() + workMs, pomodoroState: { ...prev.pomodoroState, phase: "work" } };
+      const updated: ActiveSession = { ...prev, durationMs: workMs, remainingMs: workMs, endsAt: Date.now() + workMs, pomodoroState: { ...prev.pomodoroState, phase: "work" } };
+      saveActiveSession(updated);
+      return updated;
     });
-  }, []);
+  }, [saveActiveSession]);
+
+  useEffect(() => {
+    if (!restoredSessionRef.current || !currentSession) return;
+    restoredSessionRef.current = false;
+    if (!currentSession.paused) {
+      setTimeout(() => startTick(), 50);
+    }
+  }, [currentSession, startTick]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") {
+        saveActiveSession(currentSession);
+      }
+    });
+    return () => sub.remove();
+  }, [currentSession, saveActiveSession]);
 
   const addCustomPreset = useCallback((preset: Omit<CustomPreset, "id">) => {
     const np: CustomPreset = { ...preset, id: `cp_${Date.now()}` };
@@ -439,13 +582,11 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   })();
 
   const bestStreak = (() => {
-    const sorted = [...new Set(sessions.map((s) => getDayKey(s.startedAt)))].sort();
+    const sorted = [...new Set(sessions.map((s) => getDayIndex(s.startedAt)))].sort((a, b) => a - b);
     let best = 0, cur = 0;
     for (let i = 0; i < sorted.length; i++) {
       if (i === 0) { cur = 1; continue; }
-      const prev = new Date(sorted[i - 1]).getTime() + 86400000;
-      const curr = new Date(sorted[i]).getTime();
-      if (Math.abs(prev - curr) <= 1) cur++;
+      if (sorted[i] - sorted[i - 1] === 1) cur++;
       else cur = 1;
       best = Math.max(best, cur);
     }

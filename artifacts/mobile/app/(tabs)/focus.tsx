@@ -574,7 +574,7 @@ export default function FocusScreen() {
             <View style={styles.phaseBadgeRow}>
               <View style={[styles.phaseBadge, { backgroundColor: ps.phase === "work" ? activeColor + "22" : colors.success + "22" }]}>
                 <Text style={[styles.phaseBadgeText, { color: ps.phase === "work" ? activeColor : colors.success }]}>
-                  {phaseLabelMap[ps.phase]} · Cycle {Math.max(1, Math.ceil((ps.completedCycles + 1) / 2))}
+                  {phaseLabelMap[ps.phase]} · Cycle {ps.completedCycles + 1}
                 </Text>
               </View>
               <View style={styles.cycleDots}>

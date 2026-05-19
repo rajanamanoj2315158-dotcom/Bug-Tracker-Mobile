@@ -308,6 +308,7 @@ function AppRuleEditor({
         </View>
         <Switch
           value={app.blocked}
+          disabled={app.blockConfig.permanent && app.blocked}
           onValueChange={() => toggleAppBlocked(app.name)}
           trackColor={{ false: colors.border, true: colors.destructive }}
           thumbColor={colors.foreground}
@@ -536,7 +537,7 @@ export default function BlockScreen() {
     if (v) {
       Alert.alert(
         "Activate Strict Mode?",
-        "• All blocked apps permanently locked\n• Pause button hidden\n• Back button bypass disabled\n• Whitelist apps only accessible\n• Emergency unlock: 30-min cooldown\n\nAre you ready to lock in?",
+        "• Focus overlay locked\n• Back button bypass disabled\n• Session survives app reopen\n• Emergency unlock: 30-min cooldown\n\nNative device-wide app blocking still requires the Android blocker module in production builds.",
         [
           { text: "Not yet", style: "cancel" },
           { text: "Lock it down", style: "destructive", onPress: () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); setStrictMode(true); } },
@@ -606,12 +607,12 @@ export default function BlockScreen() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.strictTitle, strictModeEnabled && { color: colors.destructive }]}>
-            Strict Mode {strictModeEnabled ? "— ACTIVE" : ""}
+            Strict Mode {strictModeEnabled ? "ACTIVE" : ""}
           </Text>
           <Text style={styles.strictSub}>
             {strictModeEnabled
               ? "Lockdown active. No bypasses. Only whitelist apps accessible."
-              : "Tap to activate unbreakable focus lockdown"}
+              : "Tap to activate focus lockdown"}
           </Text>
         </View>
         <View style={[styles.strictToggleDot, { backgroundColor: strictModeEnabled ? colors.destructive : colors.border }]} />
@@ -736,6 +737,7 @@ export default function BlockScreen() {
                     </View>
                     <Switch
                       value={app.blocked}
+                      disabled={app.blockConfig.permanent && app.blocked}
                       onValueChange={() => { Haptics.selectionAsync(); toggleAppBlocked(app.name); }}
                       trackColor={{ false: colors.border, true: colors.destructive }}
                       thumbColor={colors.foreground}
@@ -812,7 +814,7 @@ export default function BlockScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.label}>Strict Mode</Text>
-                  <Text style={styles.sub}>Unbreakable lockdown. Whitelist apps only.</Text>
+                  <Text style={styles.sub}>Focus overlay, back-button lock, and session recovery.</Text>
                 </View>
                 <Switch
                   value={strictModeEnabled}
@@ -826,10 +828,10 @@ export default function BlockScreen() {
               <View style={styles.divider} />
 
               {[
-                { label: "Pause button hidden", icon: "eye-off", desc: "Timer pause is invisible in strict mode" },
-                { label: "Back button locked", icon: "arrow-left-circle", desc: "Back navigation cannot bypass block screen" },
-                { label: "Recent apps blocked", icon: "layers", desc: "Switching via recents still hits block screen" },
-                { label: "Instant reblock", icon: "zap", desc: "Block screen reappears immediately on any attempt" },
+                { label: "Overlay locked", icon: "eye-off", desc: "Strict screen covers the app during active sessions" },
+                { label: "Back button locked", icon: "arrow-left-circle", desc: "Android back cannot dismiss the strict overlay" },
+                { label: "Native blocker required", icon: "layers", desc: "Device-wide app interception needs the Android service module" },
+                { label: "Bypass attempts logged", icon: "zap", desc: "Back-button attempts increment strict-mode telemetry" },
                 { label: "Session survives reopen", icon: "refresh-cw", desc: "Closing and reopening app maintains lockdown" },
               ].map((item, i) => (
                 <View key={i} style={styles.strictFeatureRow}>
@@ -850,7 +852,7 @@ export default function BlockScreen() {
             <View style={styles.infoBox}>
               <Feather name="check-circle" size={13} color={colors.success} />
               <Text style={styles.infoBoxText}>
-                Only these apps can be opened during Strict Mode. Edit the list before starting a session.
+                Whitelist is used by the strict-mode UI today. Device-wide enforcement requires the native Android blocker module.
               </Text>
             </View>
             <View style={styles.whitelistGrid}>

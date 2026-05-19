@@ -223,7 +223,11 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   }, [save]);
   const toggleAppBlocked = useCallback((name: string) => {
     setApps((prev) => {
-      const next = prev.map((a) => a.name === name ? { ...a, blocked: !a.blocked } : a);
+      const next = prev.map((a) => {
+        if (a.name !== name) return a;
+        if (a.blockConfig.permanent && a.blocked) return a;
+        return { ...a, blocked: !a.blocked };
+      });
       save(APPS_KEY, next);
       return next;
     });

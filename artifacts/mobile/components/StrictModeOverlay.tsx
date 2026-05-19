@@ -17,10 +17,10 @@ import { useUsage } from "@/context/UsageContext";
 const HOLD_MS = 30000;
 const MESSAGE_ROTATE_MS = 6000;
 const MESSAGES = [
-  "Distraction is a decision. Stay locked in.",
-  "Your future self is watching this moment.",
-  "One urge resisted is momentum gained.",
-  "Deep focus now. Rewards later.",
+  "Distraction is not an accident. It is a choice.",
+  "You are in a locked session. Finish what you started.",
+  "Short-term urges are expensive. Stay in control.",
+  "The timer ends. Your momentum should not.",
 ];
 
 function formatRemaining(ms: number) {
@@ -50,6 +50,7 @@ export default function StrictModeOverlay() {
   const shake = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(1)).current;
   const holdStartRef = useRef<number | null>(null);
+  const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -57,12 +58,17 @@ export default function StrictModeOverlay() {
   }, []);
 
   useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1.08, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1.07, duration: 700, useNativeDriver: true }),
         Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
       ]),
-    ).start();
+    );
+    pulseLoopRef.current = loop;
+    loop.start();
+    return () => {
+      pulseLoopRef.current?.stop();
+    };
   }, [pulse]);
 
   useEffect(() => {
@@ -97,7 +103,7 @@ export default function StrictModeOverlay() {
       setHoldProgress(p);
       if (p >= 1) {
         setHolding(false);
-        setHoldProgress(1);
+        holdStartRef.current = null;
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         confirmEmergencyUnlock();
       }
@@ -113,32 +119,50 @@ export default function StrictModeOverlay() {
   if (!strictModeEnabled || !activeSession) return null;
 
   const unlockState = requestEmergencyUnlock();
+  const totalDuration = Math.max(1, activeSession.endTime - activeSession.startTime);
+  const sessionPct = Math.min(1, Math.max(0, (now - activeSession.startTime) / totalDuration));
   const holdSec = Math.ceil((HOLD_MS * (1 - holdProgress)) / 1000);
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + 18, paddingBottom: insets.bottom + 16 }]}>
-      <Animated.View style={{ transform: [{ translateX: shake }] }}>
-        <Animated.View style={[styles.lock, { transform: [{ scale: pulse }] }]}>
-          <Feather name="shield" size={64} color="#f87171" />
-        </Animated.View>
-      </Animated.View>
-
-      <Text style={styles.title}>STRICT MODE ACTIVE</Text>
-      <Text style={styles.sub}>This session is locked until timer completion.</Text>
-      <Text style={styles.message}>"{MESSAGES[messageIndex]}"</Text>
-
-      <View style={styles.stats}>
-        <Stat label="Time Left" value={formatRemaining(remaining)} />
-        <Stat label="Bypass Attempts" value={String(activeSession.bypassAttempts)} />
-        <Stat label="Distractions Today" value={String(todayDistractionCount)} />
+    <View style={[styles.root, { paddingTop: insets.top + 18, paddingBottom: insets.bottom + 18 }]}>
+      <View style={styles.header}>
+        <Text style={styles.headerKicker}>LOCKDOWN</Text>
+        <Text style={styles.title}>Strict Mode Active</Text>
       </View>
 
-      <View style={styles.whitelistWrap}>
-        <Text style={styles.whitelistTitle}>Allowed During Lockdown</Text>
+      <Animated.View style={[styles.mainCard, { transform: [{ translateX: shake }] }]}>
+        <Animated.View style={[styles.lockCircle, { transform: [{ scale: pulse }] }]}>
+          <Feather name="shield-off" size={42} color="#fca5a5" />
+        </Animated.View>
+        <Text style={styles.message}>{MESSAGES[messageIndex]}</Text>
+
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>Time Left</Text>
+          <Text style={styles.rowValue}>{formatRemaining(remaining)}</Text>
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>Bypass Attempts</Text>
+          <Text style={styles.rowValue}>{activeSession.bypassAttempts}</Text>
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>Distractions Today</Text>
+          <Text style={styles.rowValue}>{todayDistractionCount}</Text>
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>Mode</Text>
+          <Text style={styles.rowValue}>{activeSession.mode.replace("_", " ")}</Text>
+        </View>
+        <View style={styles.track}>
+          <View style={[styles.trackFill, { width: `${sessionPct * 100}%` }]} />
+        </View>
+      </Animated.View>
+
+      <View style={styles.whitelistCard}>
+        <Text style={styles.whitelistTitle}>Allowed Apps</Text>
         <View style={styles.whitelistChips}>
           {whitelist.slice(0, 8).map((item) => (
             <View key={item.name} style={styles.whitelistChip}>
-              <Feather name={item.icon as any} size={11} color="#86efac" />
+              <Feather name={item.icon as any} size={10} color="#86efac" />
               <Text style={styles.whitelistChipText}>{item.name}</Text>
             </View>
           ))}
@@ -146,48 +170,35 @@ export default function StrictModeOverlay() {
         </View>
       </View>
 
+      <Pressable
+        disabled={!unlockState.allowed}
+        onPressIn={() => {
+          if (!unlockState.allowed) return;
+          setHolding(true);
+          holdStartRef.current = Date.now();
+          setHoldProgress(0);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        }}
+        onPressOut={() => {
+          setHolding(false);
+          holdStartRef.current = null;
+          if (holdProgress < 1) setHoldProgress(0);
+        }}
+        style={[styles.emergencyBtn, !unlockState.allowed && styles.emergencyBtnDisabled]}
+      >
+        <Text style={styles.emergencyText}>
+          {unlockState.allowed
+            ? holding ? `Keep holding (${holdSec}s)` : "Hold 30s for emergency unlock"
+            : `Cooldown: ${Math.ceil(unlockState.cooldownRemainingMs / 60000)} min`}
+        </Text>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${holdProgress * 100}%` }]} />
+        </View>
+      </Pressable>
+
       <Text style={styles.note}>
-        Restarting the app does not disable strict mode. Session id: {activeSession.id.slice(0, 12)}
+        Session id: {activeSession.id.slice(0, 12)}. Restarting app does not end strict mode.
       </Text>
-
-      <View style={styles.footer}>
-        <Pressable
-          disabled={!unlockState.allowed}
-          onPressIn={() => {
-            if (!unlockState.allowed) return;
-            setHolding(true);
-            holdStartRef.current = Date.now();
-            setHoldProgress(0);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          }}
-          onPressOut={() => {
-            setHolding(false);
-            holdStartRef.current = null;
-            if (holdProgress < 1) setHoldProgress(0);
-          }}
-          style={[styles.emergencyBtn, !unlockState.allowed && styles.emergencyBtnDisabled]}
-        >
-          <Text style={styles.emergencyText}>
-            {unlockState.allowed
-              ? holding
-                ? `Keep holding (${holdSec}s)`
-                : "Hold 30s for emergency unlock"
-              : `Cooldown: ${Math.ceil(unlockState.cooldownRemainingMs / 60000)} min`}
-          </Text>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${holdProgress * 100}%` }]} />
-          </View>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.statCard}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
     </View>
   );
 }
@@ -197,66 +208,69 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 9999,
     elevation: 20,
-    backgroundColor: "#09090b",
+    backgroundColor: "#080a12",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
+    gap: 12,
   },
-  lock: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+  header: { width: "100%", alignItems: "center", gap: 4 },
+  headerKicker: { color: "#fb7185", fontSize: 11, fontFamily: "Inter_700Bold", letterSpacing: 0.8 },
+  title: { color: "#fafafa", fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: 0.3 },
+  mainCard: {
+    width: "100%",
+    backgroundColor: "#101322",
+    borderWidth: 1,
+    borderColor: "#272a3d",
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 9,
+  },
+  lockCircle: {
+    width: 78,
+    height: 78,
+    borderRadius: 39,
     borderWidth: 2,
     borderColor: "#7f1d1d",
-    backgroundColor: "#1c1917",
+    backgroundColor: "#1d1120",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: Platform.OS === "ios" ? 8 : 0,
+    alignSelf: "center",
+    marginTop: Platform.OS === "ios" ? 2 : 0,
   },
-  title: { color: "#fafafa", fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: 0.8 },
-  sub: { color: "#a1a1aa", fontSize: 14, fontFamily: "Inter_500Medium", textAlign: "center", marginTop: -16 },
-  message: { color: "#fca5a5", fontSize: 13, fontFamily: "Inter_500Medium", textAlign: "center", marginTop: -18 },
-  stats: { width: "100%", gap: 10 },
-  statCard: {
-    borderWidth: 1,
-    borderColor: "#27272a",
-    backgroundColor: "#111827",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  statLabel: { color: "#a1a1aa", fontFamily: "Inter_500Medium", fontSize: 13 },
-  statValue: { color: "#fef2f2", fontFamily: "Inter_700Bold", fontSize: 15 },
-  note: { color: "#71717a", fontSize: 12, fontFamily: "Inter_400Regular", textAlign: "center" },
-  whitelistWrap: {
+  message: { color: "#fca5a5", fontSize: 13, fontFamily: "Inter_500Medium", textAlign: "center" },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  rowLabel: { color: "#a1a1aa", fontFamily: "Inter_500Medium", fontSize: 12 },
+  rowValue: { color: "#f4f4f5", fontFamily: "Inter_700Bold", fontSize: 14, textTransform: "capitalize" },
+  track: { height: 6, borderRadius: 99, backgroundColor: "#222633", overflow: "hidden", marginTop: 3 },
+  trackFill: { height: "100%", backgroundColor: "#fb7185" },
+  whitelistCard: {
     width: "100%",
     borderWidth: 1,
-    borderColor: "#27272a",
-    backgroundColor: "#0f172a",
+    borderColor: "#243244",
+    backgroundColor: "#0e1927",
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,
   },
   whitelistTitle: { color: "#d4d4d8", fontFamily: "Inter_600SemiBold", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6 },
-  whitelistChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  whitelistChips: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
   whitelistChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "#14532d",
     backgroundColor: "#052e16",
-    paddingHorizontal: 9,
+    paddingHorizontal: 8,
     paddingVertical: 5,
   },
   whitelistChipText: { color: "#bbf7d0", fontFamily: "Inter_500Medium", fontSize: 11 },
-  footer: { width: "100%" },
   emergencyBtn: {
+    width: "100%",
     borderWidth: 1,
     borderColor: "#7f1d1d",
     borderRadius: 14,
@@ -268,4 +282,5 @@ const styles = StyleSheet.create({
   emergencyText: { color: "#fecaca", fontFamily: "Inter_600SemiBold", fontSize: 13, textAlign: "center" },
   progressTrack: { height: 8, borderRadius: 999, backgroundColor: "#2a2a2f", overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: "#ef4444" },
+  note: { color: "#71717a", fontSize: 11, fontFamily: "Inter_400Regular", textAlign: "center" },
 });

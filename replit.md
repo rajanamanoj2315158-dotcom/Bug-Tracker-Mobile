@@ -1,45 +1,35 @@
-# [Project name]
+# Focus Shield Mobile
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Focus mode, strict sessions, local usage tracking, app-blocking rules, habits, and analytics for building phone discipline.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `pnpm --filter @workspace/api-server run dev` - API server
+- `pnpm --filter @workspace/mobile run dev` - Expo mobile app
+- `pnpm run typecheck` - full workspace typecheck
+- `pnpm run build` - regenerate API clients, typecheck, and build packages
+- `pnpm --filter @workspace/db run migrate` - run DB migrations in production
+- `pnpm --filter @workspace/db run push` - push DB schema in development only
+- Required env for DB code: `DATABASE_URL`
+- Optional API env: `PORT`, `FRONTEND_URL`, `NODE_ENV`
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
+- Mobile: Expo Router + React Native + AsyncStorage
+- API: Express 5 + CORS allowlist + Helmet + rate limiting
 - DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Validation/codegen: Zod, OpenAPI, Orval
 
-## Where things live
+## Architecture Decisions
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
-
-## Architecture decisions
-
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
-
-## Product
-
-_Describe the high-level user-facing capabilities of this app once they exist._
-
-## User preferences
-
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Focus and strict-session state is persisted locally so sessions can recover after app restart.
+- The current Expo app cannot enforce true Android app blocking without adding native Android modules through Expo prebuild or moving to bare React Native.
+- API routes must be mounted under `/api` and end with the shared error handler.
+- `drizzle-kit push` is dev-only; production should use generated migrations.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- `scripts/post-merge.sh` requires a valid `DATABASE_URL` because it pushes the DB schema.
+- Permanent app blocks are enforced in state; users must edit the rule and remove `permanent` before unblocking.
+- Current app-blocking UI models rules locally. Real device-level blocking still needs native Android Usage Access/foreground-service implementation.
