@@ -640,6 +640,9 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     DEFAULT_CUSTOM_PRESETS,
   );
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const restartTickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const lastTickRef = useRef<number>(Date.now());
   const restoredSessionRef = useRef(false);
   const didHydrateRef = useRef(false);
@@ -772,12 +775,20 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [checkAchievements, endStrictSession, saveSessions]);
 
+  const clearScheduledTickStart = useCallback(() => {
+    if (restartTickTimeoutRef.current) {
+      clearTimeout(restartTickTimeoutRef.current);
+      restartTickTimeoutRef.current = null;
+    }
+  }, []);
+
   const stopTick = useCallback(() => {
+    clearScheduledTickStart();
     if (tickRef.current) {
       clearInterval(tickRef.current);
       tickRef.current = null;
     }
-  }, []);
+  }, [clearScheduledTickStart]);
 
   useEffect(() => () => stopTick(), [stopTick]);
 
@@ -816,6 +827,14 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const startTick = useCallback(() => {
     stopTick();
     lastTickRef.current = Date.now();
+    const scheduleTickRestart = (delayMs: number) => {
+      clearScheduledTickStart();
+      restartTickTimeoutRef.current = setTimeout(() => {
+        restartTickTimeoutRef.current = null;
+        startTick();
+      }, delayMs);
+    };
+
     tickRef.current = setInterval(() => {
       const now = Date.now();
       const delta = now - lastTickRef.current;
@@ -859,7 +878,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
                 },
               };
               saveActiveSession(updated);
-              setTimeout(() => startTick(), 100);
+              scheduleTickRestart(100);
               return updated;
             } else {
               const back: ActiveSession = {
@@ -870,7 +889,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
                 pomodoroState: { ...ps, phase: "work" },
               };
               saveActiveSession(back);
-              setTimeout(() => startTick(), 100);
+              scheduleTickRestart(100);
               return back;
             }
           }
@@ -896,7 +915,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
                 },
               };
               saveActiveSession(updated);
-              setTimeout(() => startTick(), 100);
+              scheduleTickRestart(100);
               return updated;
             }
             const updated: ActiveSession = {
@@ -912,7 +931,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
               },
             };
             saveActiveSession(updated);
-            setTimeout(() => startTick(), 100);
+            scheduleTickRestart(100);
             return updated;
           }
 
@@ -935,7 +954,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
             if (restarted.strictLockActive) {
               startStrictSession(getStrictSessionParams(restarted));
             }
-            setTimeout(() => startTick(), 100);
+            scheduleTickRestart(100);
             return restarted;
           }
 
@@ -956,6 +975,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     }, 500);
   }, [
     stopTick,
+    clearScheduledTickStart,
     commitSession,
     checkAchievements,
     unlockedIds,
@@ -963,6 +983,17 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     startStrictSession,
     endStrictSession,
   ]);
+
+  const scheduleTickStart = useCallback(
+    (delayMs = 50) => {
+      clearScheduledTickStart();
+      restartTickTimeoutRef.current = setTimeout(() => {
+        restartTickTimeoutRef.current = null;
+        startTick();
+      }, delayMs);
+    },
+    [clearScheduledTickStart, startTick],
+  );
 
   const startSession = useCallback(
     (mode: SessionMode) => {
@@ -996,14 +1027,14 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       if (session.strictLockActive) {
         startStrictSession(getStrictSessionParams(session));
       }
-      setTimeout(() => startTick(), 50);
+      scheduleTickStart();
     },
     [
       stopTick,
       finishExistingSession,
       saveActiveSession,
       startStrictSession,
-      startTick,
+      scheduleTickStart,
     ],
   );
 
@@ -1043,14 +1074,14 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       if (session.strictLockActive) {
         startStrictSession(getStrictSessionParams(session));
       }
-      setTimeout(() => startTick(), 50);
+      scheduleTickStart();
     },
     [
       stopTick,
       finishExistingSession,
       saveActiveSession,
       startStrictSession,
-      startTick,
+      scheduleTickStart,
     ],
   );
 
@@ -1091,7 +1122,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const resumeSession = useCallback(() => {
     setCurrentSession((prev) => {
       if (!prev) return prev;
-      setTimeout(() => startTick(), 50);
+      scheduleTickStart();
       const updated = {
         ...prev,
         paused: false,
@@ -1103,7 +1134,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       saveActiveSession(updated);
       return updated;
     });
-  }, [startTick, saveActiveSession]);
+  }, [scheduleTickStart, saveActiveSession]);
 
   const skipPomodoroBreak = useCallback(() => {
     setCurrentSession((prev) => {
@@ -1126,9 +1157,9 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     if (!restoredSessionRef.current || !currentSession) return;
     restoredSessionRef.current = false;
     if (!currentSession.paused) {
-      setTimeout(() => startTick(), 50);
+      scheduleTickStart();
     }
-  }, [currentSession, startTick]);
+  }, [currentSession, scheduleTickStart]);
 
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
