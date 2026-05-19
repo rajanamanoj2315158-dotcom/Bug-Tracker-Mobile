@@ -12,6 +12,8 @@ export type AuthTokenGetter = () => Promise<string | null> | string | null;
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_TIMEOUT_MS = 5 * 60_000;
+const RESPONSE_TYPES = new Set(["json", "text", "blob", "auto"]);
 
 // ---------------------------------------------------------------------------
 // Module-level configuration
@@ -35,11 +37,18 @@ export function setBaseUrl(url: string | null): void {
   }
 
   const trimmed = url.trim();
-  const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const normalized = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
   const parsed = new URL(normalized);
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new TypeError("setBaseUrl only accepts http or https URLs.");
   }
+  if (parsed.username || parsed.password) {
+    throw new TypeError("setBaseUrl does not accept embedded credentials.");
+  }
+  parsed.search = "";
+  parsed.hash = "";
 
   _baseUrl = parsed.toString().replace(/\/+$/, "");
 }
@@ -60,17 +69,51 @@ export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
 }
 
 export function setDefaultTimeoutMs(timeoutMs: number): void {
-  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
-    throw new TypeError("setDefaultTimeoutMs expects a non-negative finite number.");
+  _defaultTimeoutMs = normalizeTimeoutMs(timeoutMs);
+}
+
+function normalizeTimeoutMs(timeoutMs: number): number {
+  if (
+    !Number.isFinite(timeoutMs) ||
+    timeoutMs < 0 ||
+    timeoutMs > MAX_TIMEOUT_MS
+  ) {
+    throw new TypeError(
+      `customFetch timeout must be a non-negative finite number no greater than ${MAX_TIMEOUT_MS}ms.`,
+    );
   }
-  _defaultTimeoutMs = timeoutMs;
+  return timeoutMs;
+}
+
+function normalizeResponseType(
+  value: unknown,
+): "json" | "text" | "blob" | "auto" {
+  if (typeof value === "string" && RESPONSE_TYPES.has(value)) {
+    return value as "json" | "text" | "blob" | "auto";
+  }
+  throw new TypeError(
+    "customFetch responseType must be one of: json, text, blob, auto.",
+  );
+}
+
+function sanitizeBearerToken(token: string | null): string | null {
+  if (token === null) return null;
+  const trimmed = token.trim();
+  if (!trimmed) return null;
+  if (/[\r\n]/.test(trimmed)) {
+    throw new TypeError("Auth token must not contain newline characters.");
+  }
+  return trimmed;
 }
 
 function isRequest(input: RequestInfo | URL): input is Request {
   return typeof Request !== "undefined" && input instanceof Request;
 }
 
-function resolveMethod(input: RequestInfo | URL, explicitMethod?: string): string {
+function resolveMethod(
+  input: RequestInfo | URL,
+  explicitMethod?: string,
+): string {
   if (explicitMethod) return explicitMethod.toUpperCase();
   if (isRequest(input)) return input.method.toUpperCase();
   return "GET";
@@ -160,17 +203,19 @@ function getMediaType(headers: Headers): string | null {
 }
 
 function isJsonMediaType(mediaType: string | null): boolean {
-  return mediaType === "application/json" || Boolean(mediaType?.endsWith("+json"));
+  return (
+    mediaType === "application/json" || Boolean(mediaType?.endsWith("+json"))
+  );
 }
 
 function isTextMediaType(mediaType: string | null): boolean {
   return Boolean(
     mediaType &&
-      (mediaType.startsWith("text/") ||
-        mediaType === "application/xml" ||
-        mediaType === "text/xml" ||
-        mediaType.endsWith("+xml") ||
-        mediaType === "application/x-www-form-urlencoded"),
+    (mediaType.startsWith("text/") ||
+      mediaType === "application/xml" ||
+      mediaType === "text/xml" ||
+      mediaType.endsWith("+xml") ||
+      mediaType === "application/x-www-form-urlencoded"),
   );
 }
 
@@ -314,7 +359,10 @@ async function parseJsonBody(
   }
 }
 
-async function parseErrorBody(response: Response, method: string): Promise<unknown> {
+async function parseErrorBody(
+  response: Response,
+  method: string,
+): Promise<unknown> {
   if (hasNoBody(response, method)) {
     return null;
   }
@@ -323,7 +371,9 @@ async function parseErrorBody(response: Response, method: string): Promise<unkno
 
   // Fall back to text when blob() is unavailable (e.g. some React Native builds).
   if (mediaType && !isJsonMediaType(mediaType) && !isTextMediaType(mediaType)) {
-    return typeof response.blob === "function" ? response.blob() : response.text();
+    return typeof response.blob === "function"
+      ? response.blob()
+      : response.text();
   }
 
   const raw = await response.text();
@@ -378,7 +428,7 @@ async function parseSuccessBody(
       if (typeof response.blob !== "function") {
         throw new TypeError(
           "Blob responses are not supported in this runtime. " +
-            "Use responseType \"json\" or \"text\" instead.",
+            'Use responseType "json" or "text" instead.',
         );
       }
       return response.blob();
@@ -391,12 +441,14 @@ export async function customFetch<T = unknown>(
 ): Promise<T> {
   input = applyBaseUrl(input);
   const {
-    responseType = "auto",
+    responseType: responseTypeOption = "auto",
     headers: headersInit,
-    timeoutMs = _defaultTimeoutMs,
+    timeoutMs: timeoutMsOption = _defaultTimeoutMs,
     signal,
     ...init
   } = options;
+  const responseType = normalizeResponseType(responseTypeOption);
+  const timeoutMs = normalizeTimeoutMs(timeoutMsOption);
 
   const method = resolveMethod(input, init.method);
 
@@ -404,7 +456,10 @@ export async function customFetch<T = unknown>(
     throw new TypeError(`customFetch: ${method} requests cannot have a body.`);
   }
 
-  const headers = mergeHeaders(isRequest(input) ? input.headers : undefined, headersInit);
+  const headers = mergeHeaders(
+    isRequest(input) ? input.headers : undefined,
+    headersInit,
+  );
 
   if (
     typeof init.body === "string" &&
@@ -421,7 +476,7 @@ export async function customFetch<T = unknown>(
   // Attach bearer token when an auth getter is configured and no
   // Authorization header has been explicitly provided.
   if (_authTokenGetter && !headers.has("authorization")) {
-    const token = await _authTokenGetter();
+    const token = sanitizeBearerToken(await _authTokenGetter());
     if (token) {
       headers.set("authorization", `Bearer ${token}`);
     }
@@ -434,7 +489,12 @@ export async function customFetch<T = unknown>(
   );
 
   try {
-    const response = await fetch(input, { ...init, method, headers, signal: abortSignal.signal });
+    const response = await fetch(input, {
+      ...init,
+      method,
+      headers,
+      signal: abortSignal.signal,
+    });
 
     if (!response.ok) {
       const errorData = await parseErrorBody(response, method);
