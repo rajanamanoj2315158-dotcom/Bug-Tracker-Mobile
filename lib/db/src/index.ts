@@ -4,6 +4,7 @@ import * as schema from "./schema";
 
 const { Pool } = pg;
 const DATABASE_URL = process.env.DATABASE_URL;
+const DATABASE_CA_CERT = process.env.DATABASE_CA_CERT;
 
 if (!DATABASE_URL) {
   throw new Error(
@@ -12,15 +13,19 @@ if (!DATABASE_URL) {
 }
 
 export function createPool() {
+  const isProduction = process.env.NODE_ENV === "production";
+  const ssl = isProduction
+    ? DATABASE_CA_CERT
+      ? { rejectUnauthorized: true, ca: DATABASE_CA_CERT }
+      : { rejectUnauthorized: true }
+    : false;
+
   return new Pool({
     connectionString: DATABASE_URL,
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
-    ssl:
-      process.env.NODE_ENV === "production"
-        ? { rejectUnauthorized: false }
-        : false,
+    ssl,
   });
 }
 
