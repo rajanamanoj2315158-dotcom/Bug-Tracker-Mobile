@@ -1,7 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Battery from "expo-battery";
 import * as Haptics from "expo-haptics";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -26,6 +25,7 @@ import {
   useUsage,
   WhitelistEntry,
 } from "@/context/UsageContext";
+import { getJson, isRecord, setJson } from "@/lib/storage";
 
 type Tab = "apps" | "schedule" | "reels" | "strict" | "rules";
 
@@ -1110,6 +1110,24 @@ const REELS_PLATFORMS = [
   },
 ];
 
+const REELS_SETTINGS_KEY = "fs_reels_v1";
+
+type ReelsSettings = {
+  blocked: Record<string, boolean>;
+  globalAutoplay: boolean;
+  globalScroll: boolean;
+  grayscale: boolean;
+  dopamineDelay: number;
+};
+
+const DEFAULT_REELS_SETTINGS: ReelsSettings = {
+  blocked: {},
+  globalAutoplay: true,
+  globalScroll: false,
+  grayscale: false,
+  dopamineDelay: 0,
+};
+
 function ReelsTab({ colors, styles }: { colors: ReturnType<typeof useColors>; styles: ReturnType<typeof makeStyles> }) {
   const [blocked, setBlocked] = useState<Record<string, boolean>>({});
   const [globalAutoplay, setGlobalAutoplay] = useState(true);
@@ -1117,19 +1135,27 @@ function ReelsTab({ colors, styles }: { colors: ReturnType<typeof useColors>; st
   const [grayscale, setGrayscale] = useState(false);
   const [dopamineDelay, setDopamineDelay] = useState(0);
 
+  const persistReelsSettings = useCallback((next: Partial<ReelsSettings>) => {
+    setJson(REELS_SETTINGS_KEY, {
+      blocked,
+      globalAutoplay,
+      globalScroll,
+      grayscale,
+      dopamineDelay,
+      ...next,
+    });
+  }, [blocked, dopamineDelay, globalAutoplay, globalScroll, grayscale]);
+
   useEffect(() => {
     (async () => {
-      try {
-        const raw = await AsyncStorage.getItem("fs_reels_v1");
-        if (raw) {
-          const d = JSON.parse(raw);
-          if (d.blocked) setBlocked(d.blocked);
-          if (typeof d.globalAutoplay === "boolean") setGlobalAutoplay(d.globalAutoplay);
-          if (typeof d.globalScroll === "boolean") setGlobalScroll(d.globalScroll);
-          if (typeof d.grayscale === "boolean") setGrayscale(d.grayscale);
-          if (typeof d.dopamineDelay === "number") setDopamineDelay(d.dopamineDelay);
-        }
-      } catch {}
+      const stored = await getJson<Partial<ReelsSettings>>(REELS_SETTINGS_KEY, DEFAULT_REELS_SETTINGS, (value): value is Partial<ReelsSettings> => isRecord(value));
+      if (isRecord(stored.blocked)) {
+        setBlocked(Object.fromEntries(Object.entries(stored.blocked).filter(([, value]) => typeof value === "boolean")) as Record<string, boolean>);
+      }
+      if (typeof stored.globalAutoplay === "boolean") setGlobalAutoplay(stored.globalAutoplay);
+      if (typeof stored.globalScroll === "boolean") setGlobalScroll(stored.globalScroll);
+      if (typeof stored.grayscale === "boolean") setGrayscale(stored.grayscale);
+      if (typeof stored.dopamineDelay === "number") setDopamineDelay(Math.max(0, Math.min(300, stored.dopamineDelay)));
     })();
   }, []);
 
@@ -1137,10 +1163,8 @@ function ReelsTab({ colors, styles }: { colors: ReturnType<typeof useColors>; st
     Haptics.selectionAsync();
     const next = { ...blocked, [key]: value };
     setBlocked(next);
-    try {
-      AsyncStorage.setItem("fs_reels_v1", JSON.stringify({ blocked: next, globalAutoplay, globalScroll, grayscale, dopamineDelay }));
-    } catch {}
-  }, [blocked, globalAutoplay, globalScroll, grayscale, dopamineDelay]);
+    persistReelsSettings({ blocked: next });
+  }, [blocked, persistReelsSettings]);
 
   const blockedCount = Object.values(blocked).filter(Boolean).length;
 
@@ -1173,7 +1197,7 @@ function ReelsTab({ colors, styles }: { colors: ReturnType<typeof useColors>; st
                   const next = { ...blocked };
                   platform.features.forEach((f) => { next[`${platform.id}_${f.key}`] = newVal; });
                   setBlocked(next);
-                  try { AsyncStorage.setItem("fs_reels_v1", JSON.stringify({ blocked: next, globalAutoplay, globalScroll, grayscale, dopamineDelay })); } catch {}
+                  persistReelsSettings({ blocked: next });
                 }}
               >
                 <Text style={{ fontFamily: "Inter_600SemiBold", fontSize: 11, color: allOn ? platform.color : colors.mutedForeground }}>
@@ -1217,7 +1241,7 @@ function ReelsTab({ colors, styles }: { colors: ReturnType<typeof useColors>; st
           </View>
           <Switch
             value={globalAutoplay}
-            onValueChange={(v) => { Haptics.selectionAsync(); setGlobalAutoplay(v); }}
+            onValueChange={(v) => { Haptics.selectionAsync(); setGlobalAutoplay(v); persistReelsSettings({ globalAutoplay: v }); }}
             trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={colors.foreground}
             ios_backgroundColor={colors.border}
@@ -1231,7 +1255,7 @@ function ReelsTab({ colors, styles }: { colors: ReturnType<typeof useColors>; st
           </View>
           <Switch
             value={globalScroll}
-            onValueChange={(v) => { Haptics.selectionAsync(); setGlobalScroll(v); }}
+            onValueChange={(v) => { Haptics.selectionAsync(); setGlobalScroll(v); persistReelsSettings({ globalScroll: v }); }}
             trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={colors.foreground}
             ios_backgroundColor={colors.border}
@@ -1245,7 +1269,7 @@ function ReelsTab({ colors, styles }: { colors: ReturnType<typeof useColors>; st
           </View>
           <Switch
             value={grayscale}
-            onValueChange={(v) => { Haptics.selectionAsync(); setGrayscale(v); }}
+            onValueChange={(v) => { Haptics.selectionAsync(); setGrayscale(v); persistReelsSettings({ grayscale: v }); }}
             trackColor={{ false: colors.border, true: colors.neonPurple }}
             thumbColor={colors.foreground}
             ios_backgroundColor={colors.border}
@@ -1266,7 +1290,7 @@ function ReelsTab({ colors, styles }: { colors: ReturnType<typeof useColors>; st
                 backgroundColor: dopamineDelay === sec ? colors.neon + "18" : colors.surface,
                 borderWidth: 1, borderColor: dopamineDelay === sec ? colors.neon : colors.border,
               }}
-              onPress={() => { Haptics.selectionAsync(); setDopamineDelay(sec); }}
+              onPress={() => { Haptics.selectionAsync(); setDopamineDelay(sec); persistReelsSettings({ dopamineDelay: sec }); }}
             >
               <Text style={{ fontFamily: "Inter_500Medium", fontSize: 12, color: dopamineDelay === sec ? colors.neon : colors.mutedForeground }}>
                 {sec === 0 ? "Off" : `${sec}s`}

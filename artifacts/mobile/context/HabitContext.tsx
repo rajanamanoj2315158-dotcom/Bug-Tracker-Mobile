@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
   createContext,
   useCallback,
@@ -6,6 +5,7 @@ import React, {
   useEffect,
   useState,
 } from "react";
+import { getJson, isArray, setJson } from "@/lib/storage";
 
 export interface Habit {
   id: string;
@@ -84,6 +84,15 @@ const HABITS_KEY = "fs_habits_v2";
 const GOALS_KEY = "fs_goals_v2";
 const CHALLENGES_KEY = "fs_challenges_v2";
 
+function createDefaultChallenges(): Challenge[] {
+  return PREDEFINED_CHALLENGES.map((ch) => ({
+    ...ch,
+    startedAt: 0,
+    completedDays: [],
+    active: false,
+  }));
+}
+
 export function HabitProvider({ children }: { children: React.ReactNode }) {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [goals, setGoals] = useState<DailyGoal[]>([]);
@@ -92,41 +101,35 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [h, g, c] = await Promise.all([
-          AsyncStorage.getItem(HABITS_KEY),
-          AsyncStorage.getItem(GOALS_KEY),
-          AsyncStorage.getItem(CHALLENGES_KEY),
+        const defaults = createDefaultChallenges();
+        const [storedHabits, storedGoals, storedChallenges] = await Promise.all([
+          getJson<Habit[]>(HABITS_KEY, [], isArray as (value: unknown) => value is Habit[]),
+          getJson<DailyGoal[]>(GOALS_KEY, [], isArray as (value: unknown) => value is DailyGoal[]),
+          getJson<Challenge[]>(CHALLENGES_KEY, defaults, isArray as (value: unknown) => value is Challenge[]),
         ]);
-        if (h) setHabits(JSON.parse(h));
-        if (g) setGoals(JSON.parse(g));
-        if (c) setChallenges(JSON.parse(c));
-        else {
-          const defaults = PREDEFINED_CHALLENGES.map((ch) => ({
-            ...ch,
-            startedAt: 0,
-            completedDays: [],
-            active: false,
-          }));
-          setChallenges(defaults);
-          await AsyncStorage.setItem(CHALLENGES_KEY, JSON.stringify(defaults));
+        setHabits(storedHabits);
+        setGoals(storedGoals);
+        setChallenges(storedChallenges);
+        if (storedChallenges.length === defaults.length && storedChallenges.every((challenge) => challenge.startedAt === 0 && !challenge.active)) {
+          await setJson(CHALLENGES_KEY, storedChallenges);
         }
       } catch {}
     })();
   }, []);
 
   const saveHabits = useCallback(async (h: Habit[]) => {
-    try { await AsyncStorage.setItem(HABITS_KEY, JSON.stringify(h)); } catch {}
+    await setJson(HABITS_KEY, h);
   }, []);
   const saveGoals = useCallback(async (g: DailyGoal[]) => {
-    try { await AsyncStorage.setItem(GOALS_KEY, JSON.stringify(g)); } catch {}
+    await setJson(GOALS_KEY, g);
   }, []);
   const saveChallenges = useCallback(async (c: Challenge[]) => {
-    try { await AsyncStorage.setItem(CHALLENGES_KEY, JSON.stringify(c)); } catch {}
+    await setJson(CHALLENGES_KEY, c);
   }, []);
 
   const addHabit = useCallback((name: string, icon: string, category: Habit["category"]) => {
     const habit: Habit = {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name, icon, category,
       completedDates: [],
       createdAt: Date.now(),
@@ -166,7 +169,7 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
 
   const addGoal = useCallback((text: string) => {
     const goal: DailyGoal = {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       text,
       date: getDayKey(Date.now()),
       completed: false,

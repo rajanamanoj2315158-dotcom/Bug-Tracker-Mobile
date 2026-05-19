@@ -44,33 +44,39 @@ function setupSignalHandlers() {
   process.on("SIGHUP", cleanup);
 }
 
-function stripProtocol(domain) {
+function normalizeDeploymentTarget(domain) {
   let urlString = domain.trim();
 
   if (!/^https?:\/\//i.test(urlString)) {
     urlString = `https://${urlString}`;
   }
 
-  return new URL(urlString).host;
+  const url = new URL(urlString);
+  return { protocol: url.protocol.replace(":", ""), host: url.host };
 }
 
-function getDeploymentDomain() {
+function stripUrlProtocol(url) {
+  return url.replace(/^https?:\/\//i, "");
+}
+
+function getDeploymentTarget() {
   if (process.env.REPLIT_INTERNAL_APP_DOMAIN) {
-    return stripProtocol(process.env.REPLIT_INTERNAL_APP_DOMAIN);
+    return normalizeDeploymentTarget(process.env.REPLIT_INTERNAL_APP_DOMAIN);
   }
 
   if (process.env.REPLIT_DEV_DOMAIN) {
-    return stripProtocol(process.env.REPLIT_DEV_DOMAIN);
+    return normalizeDeploymentTarget(process.env.REPLIT_DEV_DOMAIN);
   }
 
   if (process.env.EXPO_PUBLIC_DOMAIN) {
-    return stripProtocol(process.env.EXPO_PUBLIC_DOMAIN);
+    return normalizeDeploymentTarget(process.env.EXPO_PUBLIC_DOMAIN);
   }
 
-  console.error(
-    "ERROR: No deployment domain found. Set REPLIT_INTERNAL_APP_DOMAIN, REPLIT_DEV_DOMAIN, or EXPO_PUBLIC_DOMAIN",
+  const port = process.env.PORT || "3000";
+  console.warn(
+    `No deployment domain found. Falling back to http://localhost:${port} for local/CI verification.`,
   );
-  process.exit(1);
+  return { protocol: "http", host: `localhost:${port}` };
 }
 
 function prepareDirectories(timestamp) {
@@ -475,9 +481,9 @@ function updateManifests(manifests, timestamp, baseUrl, assetsByHash) {
       Number(timestamp.split("-")[0]),
     ).toISOString();
     manifest.extra.expoClient.hostUri =
-      baseUrl.replace("https://", "") + "/" + platform;
+      stripUrlProtocol(baseUrl) + "/" + platform;
     manifest.extra.expoGo.debuggerHost =
-      baseUrl.replace("https://", "") + "/" + platform;
+      stripUrlProtocol(baseUrl) + "/" + platform;
     manifest.extra.expoGo.packagerOpts.dev = false;
 
     if (manifest.assets && manifest.assets.length > 0) {
@@ -510,15 +516,15 @@ async function main() {
 
   setupSignalHandlers();
 
-  const domain = getDeploymentDomain();
+  const deploymentTarget = getDeploymentTarget();
   const expoPublicReplId = getExpoPublicReplId();
-  const baseUrl = `https://${domain}`;
+  const baseUrl = `${deploymentTarget.protocol}://${deploymentTarget.host}`;
   const timestamp = `${Date.now()}-${process.pid}`;
 
   prepareDirectories(timestamp);
   clearMetroCache();
 
-  await startMetro(domain, expoPublicReplId);
+  await startMetro(deploymentTarget.host, expoPublicReplId);
 
   const downloadTimeout = 600000;
   const downloadPromise = downloadBundlesAndManifests(timestamp);

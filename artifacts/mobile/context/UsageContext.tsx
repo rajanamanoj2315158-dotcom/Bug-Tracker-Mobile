@@ -1,6 +1,6 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
+import { getJson, isArray, isRecord, removeStorageItem, setJson } from "@/lib/storage";
 
 export type AppCategory = "social" | "entertainment" | "productive" | "gaming" | "communication" | "news" | "other";
 export type BlockTrigger =
@@ -73,6 +73,13 @@ const DEFAULT_APPS: AppEntry[] = [
   { name: "Twitter / X", category: "social", blocked: true, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["always"], permanent: true } },
   { name: "Reddit", category: "social", blocked: false, blockConfig: { ...DEFAULT_BLOCK_CONFIG(), triggers: ["study_mode", "deep_work", "weekdays_only"] } },
 ];
+const DEFAULT_WHITELIST: WhitelistEntry[] = [
+  { name: "Phone", icon: "phone" },
+  { name: "Messages", icon: "message-circle" },
+  { name: "Calculator", icon: "hash" },
+  { name: "Notes", icon: "file-text" },
+  { name: "Camera", icon: "camera" },
+];
 const CATEGORY_COLORS: Record<AppCategory, string> = {
   social: "#f43f5e", entertainment: "#f59e0b", productive: "#22c55e", gaming: "#a855f7", communication: "#38bdf8", news: "#64748b", other: "#475569",
 };
@@ -90,6 +97,8 @@ const MAX_LOG_ENTRIES = 500;
 const EMERGENCY_COOLDOWN_MS = 30 * 60 * 1000;
 const MANUAL_STRICT_DURATION_MS = 90 * 60 * 1000;
 const SUSPENSION_RISK_MS = 2 * 60 * 1000;
+const MIN_STRICT_DURATION_MS = 60 * 1000;
+const MAX_STRICT_DURATION_MS = 24 * 60 * 60 * 1000;
 
 interface UsageContextValue {
   apps: AppEntry[];
@@ -159,12 +168,32 @@ function overlaps(a: TimetableSlot, b: TimetableSlot) {
   return aRanges.some((ar) => bRanges.some((br) => ar.start < br.end && br.start < ar.end));
 }
 
+function isSettings(value: unknown): value is { lockMode?: unknown; emergencyUnlock?: unknown } {
+  return isRecord(value);
+}
+
+function isStrictModeSession(value: unknown): value is StrictModeSession {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === SCHEMA_VERSION &&
+    typeof value.id === "string" &&
+    typeof value.startTime === "number" &&
+    typeof value.endTime === "number" &&
+    (value.mode === "pomodoro" || value.mode === "deep_work" || value.mode === "custom") &&
+    typeof value.blockedApp === "string" &&
+    typeof value.bypassAttempts === "number"
+  );
+}
+
+function clampStrictDuration(durationMs: number) {
+  if (!Number.isFinite(durationMs)) return MANUAL_STRICT_DURATION_MS;
+  return Math.min(MAX_STRICT_DURATION_MS, Math.max(MIN_STRICT_DURATION_MS, durationMs));
+}
+
 export function UsageProvider({ children }: { children: React.ReactNode }) {
   const [apps, setApps] = useState<AppEntry[]>(DEFAULT_APPS);
   const [blockRules, setBlockRules] = useState<BlockRule[]>([]);
-  const [whitelist, setWhitelist] = useState<WhitelistEntry[]>([
-    { name: "Phone", icon: "phone" }, { name: "Messages", icon: "message-circle" }, { name: "Calculator", icon: "hash" }, { name: "Notes", icon: "file-text" }, { name: "Camera", icon: "camera" },
-  ]);
+  const [whitelist, setWhitelist] = useState<WhitelistEntry[]>(DEFAULT_WHITELIST);
   const [timetable, setTimetable] = useState<TimetableSlot[]>([]);
   const [distractionLog, setDistractionLog] = useState<DistractionAttempt[]>([]);
   const [emergencyUnlock, setEmergencyUnlock] = useState<EmergencyUnlock | null>(null);
@@ -180,38 +209,38 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [a, r, w, t, s, d, rawSession] = await Promise.all([
-          AsyncStorage.getItem(APPS_KEY), AsyncStorage.getItem(RULES_KEY), AsyncStorage.getItem(WHITELIST_KEY),
-          AsyncStorage.getItem(TIMETABLE_KEY), AsyncStorage.getItem(SETTINGS_KEY), AsyncStorage.getItem(DISTRACTION_KEY),
-          AsyncStorage.getItem(STRICT_SESSION_KEY),
+        const [storedApps, storedRules, storedWhitelist, storedTimetable, settings, storedDistractions, session, reliability] = await Promise.all([
+          getJson<AppEntry[]>(APPS_KEY, DEFAULT_APPS, isArray as (value: unknown) => value is AppEntry[]),
+          getJson<BlockRule[]>(RULES_KEY, [], isArray as (value: unknown) => value is BlockRule[]),
+          getJson<WhitelistEntry[]>(WHITELIST_KEY, DEFAULT_WHITELIST, isArray as (value: unknown) => value is WhitelistEntry[]),
+          getJson<TimetableSlot[]>(TIMETABLE_KEY, [], isArray as (value: unknown) => value is TimetableSlot[]),
+          getJson<{ lockMode?: unknown; emergencyUnlock?: unknown }>(SETTINGS_KEY, {}, isSettings),
+          getJson<DistractionAttempt[]>(DISTRACTION_KEY, [], isArray as (value: unknown) => value is DistractionAttempt[]),
+          getJson<StrictModeSession | null>(STRICT_SESSION_KEY, null, (value): value is StrictModeSession | null => value === null || isStrictModeSession(value)),
+          getJson<StrictReliabilityState | null>(STRICT_RELIABILITY_KEY, null, (value): value is StrictReliabilityState | null => value === null || isRecord(value)),
         ]);
-        if (a) setApps(JSON.parse(a));
-        if (r) setBlockRules(JSON.parse(r));
-        if (w) setWhitelist(JSON.parse(w));
-        if (t) setTimetable(JSON.parse(t));
-        if (d) setDistractionLog(JSON.parse(d));
-        if (s) {
-          const p = JSON.parse(s);
-          if (p.lockMode !== undefined) setLockModeEnabled(p.lockMode);
-          if (p.emergencyUnlock) setEmergencyUnlock(p.emergencyUnlock);
+        setApps(storedApps);
+        setBlockRules(storedRules);
+        setWhitelist(storedWhitelist);
+        setTimetable(storedTimetable);
+        setDistractionLog(storedDistractions.slice(0, MAX_LOG_ENTRIES));
+        if (typeof settings.lockMode === "boolean") setLockModeEnabled(settings.lockMode);
+        if (isRecord(settings.emergencyUnlock) && typeof settings.emergencyUnlock.unlockedAt === "number") {
+          setEmergencyUnlock({
+            unlockedAt: settings.emergencyUnlock.unlockedAt,
+            cooldownMs: typeof settings.emergencyUnlock.cooldownMs === "number" ? settings.emergencyUnlock.cooldownMs : EMERGENCY_COOLDOWN_MS,
+          });
         }
-        if (rawSession) {
-          const session: StrictModeSession = JSON.parse(rawSession);
-          if (session.schemaVersion === SCHEMA_VERSION && session.endTime > Date.now()) {
-            setActiveSession(session);
-          } else {
-            await AsyncStorage.removeItem(STRICT_SESSION_KEY);
-          }
+        if (session && session.endTime > Date.now()) {
+          setActiveSession(session);
+        } else if (session) {
+          await removeStorageItem(STRICT_SESSION_KEY);
         }
-        const reliabilityRaw = await AsyncStorage.getItem(STRICT_RELIABILITY_KEY);
-        if (reliabilityRaw) {
-          const parsed = JSON.parse(reliabilityRaw);
-          if (typeof parsed?.interruptionCount === "number") {
-            setStrictReliability({
-              interruptionCount: parsed.interruptionCount,
-              lastInterruptionAt: typeof parsed.lastInterruptionAt === "number" ? parsed.lastInterruptionAt : null,
-            });
-          }
+        if (reliability && typeof reliability.interruptionCount === "number") {
+          setStrictReliability({
+            interruptionCount: reliability.interruptionCount,
+            lastInterruptionAt: typeof reliability.lastInterruptionAt === "number" ? reliability.lastInterruptionAt : null,
+          });
         }
       } catch {}
     })();
@@ -222,18 +251,18 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
     const ms = activeSession.endTime - Date.now();
     if (ms <= 0) {
       setActiveSession(null);
-      queue.current.enqueue(() => AsyncStorage.removeItem(STRICT_SESSION_KEY));
+      queue.current.enqueue(() => removeStorageItem(STRICT_SESSION_KEY).then(() => undefined));
       return;
     }
     const t = setTimeout(() => {
       setActiveSession(null);
-      queue.current.enqueue(() => AsyncStorage.removeItem(STRICT_SESSION_KEY));
-    }, ms);
+      queue.current.enqueue(() => removeStorageItem(STRICT_SESSION_KEY).then(() => undefined));
+    }, Math.min(ms, 2_147_483_647));
     return () => clearTimeout(t);
   }, [activeSession]);
 
   const save = useCallback(<T,>(key: string, val: T) => {
-    queue.current.enqueue(async () => { try { await AsyncStorage.setItem(key, JSON.stringify(val)); } catch {} });
+    queue.current.enqueue(() => setJson(key, val).then(() => undefined));
   }, []);
 
   const persistSettings = useCallback((next: { lockMode: boolean; strictMode: boolean; emergencyUnlock: EmergencyUnlock | null }) => {
@@ -242,10 +271,8 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
 
   const persistSession = useCallback((session: StrictModeSession | null) => {
     queue.current.enqueue(async () => {
-      try {
-        if (session) await AsyncStorage.setItem(STRICT_SESSION_KEY, JSON.stringify(session));
-        else await AsyncStorage.removeItem(STRICT_SESSION_KEY);
-      } catch {}
+      if (session) await setJson(STRICT_SESSION_KEY, session);
+      else await removeStorageItem(STRICT_SESSION_KEY);
     });
   }, []);
 
@@ -353,11 +380,12 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
 
   const startStrictSession = useCallback(async ({ durationMs, mode, blockedApp = "" }: StartSessionParams) => {
     const now = Date.now();
+    const safeDurationMs = clampStrictDuration(durationMs);
     const session: StrictModeSession = {
       schemaVersion: SCHEMA_VERSION,
       id: `session_${now}_${Math.random().toString(36).slice(2, 8)}`,
       startTime: now,
-      endTime: now + durationMs,
+      endTime: now + safeDurationMs,
       mode,
       blockedApp,
       bypassAttempts: 0,
@@ -424,7 +452,7 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
 
   const clearDistractionLog = useCallback(async () => {
     setDistractionLog([]);
-    queue.current.enqueue(async () => { try { await AsyncStorage.removeItem(DISTRACTION_KEY); } catch {} });
+    queue.current.enqueue(() => removeStorageItem(DISTRACTION_KEY).then(() => undefined));
   }, []);
 
   useEffect(() => {
@@ -441,19 +469,21 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
         const suspendedFor = Date.now() - backgroundAtRef.current;
         backgroundAtRef.current = null;
         if (suspendedFor >= SUSPENSION_RISK_MS) {
-          const nextReliability: StrictReliabilityState = {
-            interruptionCount: strictReliability.interruptionCount + 1,
-            lastInterruptionAt: Date.now(),
-          };
-          setStrictReliability(nextReliability);
-          save(STRICT_RELIABILITY_KEY, nextReliability);
+          setStrictReliability((prevReliability) => {
+            const nextReliability: StrictReliabilityState = {
+              interruptionCount: prevReliability.interruptionCount + 1,
+              lastInterruptionAt: Date.now(),
+            };
+            save(STRICT_RELIABILITY_KEY, nextReliability);
+            return nextReliability;
+          });
           logDistractionAttempt("System suspension risk", activeSession?.mode);
         }
       }
     });
 
     return () => sub.remove();
-  }, [activeSession?.mode, logDistractionAttempt, save, strictModeEnabled, strictReliability]);
+  }, [activeSession?.mode, logDistractionAttempt, save, strictModeEnabled]);
 
   const blockedApps = useMemo(() => apps.filter((a) => a.blocked), [apps]);
   const todayDistractionCount = useMemo(() => {

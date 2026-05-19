@@ -51,13 +51,16 @@ export default function StrictModeOverlay() {
   const pulse = useRef(new Animated.Value(1)).current;
   const holdStartRef = useRef<number | null>(null);
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+  const overlayActive = strictModeEnabled && activeSession !== null;
 
   useEffect(() => {
+    if (!overlayActive) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [overlayActive]);
 
   useEffect(() => {
+    if (!overlayActive) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1.07, duration: 700, useNativeDriver: true }),
@@ -69,17 +72,18 @@ export default function StrictModeOverlay() {
     return () => {
       pulseLoopRef.current?.stop();
     };
-  }, [pulse]);
+  }, [overlayActive, pulse]);
 
   useEffect(() => {
+    if (!overlayActive) return;
     const t = setInterval(() => {
       setMessageIndex((prev) => (prev + 1) % MESSAGES.length);
     }, MESSAGE_ROTATE_MS);
     return () => clearInterval(t);
-  }, []);
+  }, [overlayActive]);
 
   useEffect(() => {
-    if (!strictModeEnabled) return;
+    if (!overlayActive) return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       recordBypassAttempt();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -92,10 +96,10 @@ export default function StrictModeOverlay() {
       return true;
     });
     return () => sub.remove();
-  }, [recordBypassAttempt, shake, strictModeEnabled]);
+  }, [overlayActive, recordBypassAttempt, shake]);
 
   useEffect(() => {
-    if (!holding) return;
+    if (!overlayActive || !holding) return;
     const timer = setInterval(() => {
       if (!holdStartRef.current) return;
       const elapsed = Date.now() - holdStartRef.current;
@@ -109,14 +113,21 @@ export default function StrictModeOverlay() {
       }
     }, 120);
     return () => clearInterval(timer);
-  }, [holding, confirmEmergencyUnlock]);
+  }, [overlayActive, holding, confirmEmergencyUnlock]);
+
+  useEffect(() => {
+    if (overlayActive) return;
+    setHolding(false);
+    setHoldProgress(0);
+    holdStartRef.current = null;
+  }, [overlayActive]);
 
   const remaining = useMemo(() => {
     if (!activeSession) return 0;
     return Math.max(0, activeSession.endTime - now);
   }, [activeSession, now]);
 
-  if (!strictModeEnabled || !activeSession) return null;
+  if (!overlayActive || !activeSession) return null;
 
   const unlockState = requestEmergencyUnlock();
   const totalDuration = Math.max(1, activeSession.endTime - activeSession.startTime);

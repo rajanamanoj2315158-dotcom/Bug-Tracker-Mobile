@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
   createContext,
   useCallback,
@@ -9,6 +8,7 @@ import React, {
 } from "react";
 import { AppState } from "react-native";
 import { useUsage } from "@/context/UsageContext";
+import { getJson, isArray, isRecord, removeStorageItem, setJson } from "@/lib/storage";
 
 export type SessionMode =
   | "pomodoro"
@@ -134,6 +134,8 @@ interface PersistedActiveSession extends ActiveSession {
 function restoreActiveSession(raw: PersistedActiveSession): ActiveSession | null {
   if (typeof raw.startedAt !== "number" || typeof raw.durationMs !== "number") return null;
   if (typeof raw.remainingMs !== "number" || typeof raw.paused !== "boolean") return null;
+  if (!Number.isFinite(raw.durationMs) || raw.durationMs < 0) return null;
+  if (!Number.isFinite(raw.remainingMs) || raw.remainingMs < 0) return null;
 
   const now = Date.now();
 
@@ -158,14 +160,16 @@ function isExpiredActiveSession(raw: PersistedActiveSession) {
 }
 
 function createSessionRecord(session: ActiveSession, completed: boolean, endedAt = Date.now()): SessionRecord | null {
-  const elapsed = Math.max(0, session.durationMs - session.remainingMs);
+  const elapsed = session.timerMode === "stopwatch"
+    ? Math.max(0, session.remainingMs)
+    : Math.max(0, session.durationMs - session.remainingMs);
   if (elapsed < 10000 && !completed) return null;
 
   return {
     id: `${endedAt}-${Math.random().toString(36).slice(2, 8)}`,
     mode: session.mode,
     durationMs: session.durationMs,
-    completedMs: completed ? session.durationMs : elapsed,
+    completedMs: completed && session.timerMode !== "stopwatch" ? session.durationMs : elapsed,
     startedAt: session.startedAt,
     endedAt,
     completed,
@@ -207,6 +211,21 @@ const PRESETS_KEY = "fs_custom_presets_v1";
 const ACTIVE_SESSION_KEY = "fs_active_session_v2";
 const ACTIVE_SESSION_SCHEMA_VERSION = 2;
 
+function isPersistedActiveSession(value: unknown): value is PersistedActiveSession {
+  return (
+    isRecord(value) &&
+    typeof value.mode === "string" &&
+    typeof value.durationMs === "number" &&
+    typeof value.startedAt === "number" &&
+    typeof value.remainingMs === "number" &&
+    typeof value.paused === "boolean"
+  );
+}
+
+function asStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
 export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
@@ -219,29 +238,27 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const { startStrictSession, endStrictSession } = useUsage();
 
   const saveSessions = useCallback(async (s: SessionRecord[]) => {
-    try { await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(s)); } catch {}
+    await setJson(SESSIONS_KEY, s);
   }, []);
 
   const saveActiveSession = useCallback(async (session: ActiveSession | null) => {
-    try {
-      if (!session) {
-        await AsyncStorage.removeItem(ACTIVE_SESSION_KEY);
-        return;
-      }
+    if (!session) {
+      await removeStorageItem(ACTIVE_SESSION_KEY);
+      return;
+    }
 
-      const persisted: PersistedActiveSession = {
-        ...session,
-        schemaVersion: ACTIVE_SESSION_SCHEMA_VERSION,
-        savedAt: Date.now(),
-      };
-      await AsyncStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(persisted));
-    } catch {}
+    const persisted: PersistedActiveSession = {
+      ...session,
+      schemaVersion: ACTIVE_SESSION_SCHEMA_VERSION,
+      savedAt: Date.now(),
+    };
+    await setJson(ACTIVE_SESSION_KEY, persisted);
   }, []);
 
   const unlockAchievement = useCallback(async (id: string, prev: Set<string>) => {
     if (prev.has(id)) return prev;
     const next = new Set(prev).add(id);
-    try { await AsyncStorage.setItem(ACHIEVEMENTS_KEY, JSON.stringify([...next])); } catch {}
+    await setJson(ACHIEVEMENTS_KEY, [...next]);
     return next;
   }, []);
 
@@ -267,34 +284,32 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
 
     (async () => {
       try {
-        const [s, a, p, active] = await Promise.all([
-          AsyncStorage.getItem(SESSIONS_KEY),
-          AsyncStorage.getItem(ACHIEVEMENTS_KEY),
-          AsyncStorage.getItem(PRESETS_KEY),
-          AsyncStorage.getItem(ACTIVE_SESSION_KEY),
+        const [loadedSessions, loadedUnlocked, loadedPresets, parsedActive] = await Promise.all([
+          getJson<SessionRecord[]>(SESSIONS_KEY, [], isArray as (value: unknown) => value is SessionRecord[]),
+          getJson<string[]>(ACHIEVEMENTS_KEY, [], asStringArray),
+          getJson<CustomPreset[]>(PRESETS_KEY, DEFAULT_CUSTOM_PRESETS, isArray as (value: unknown) => value is CustomPreset[]),
+          getJson<PersistedActiveSession | null>(ACTIVE_SESSION_KEY, null, (value): value is PersistedActiveSession | null => value === null || isPersistedActiveSession(value)),
         ]);
-        const loadedSessions: SessionRecord[] = s ? JSON.parse(s) : [];
-        const loadedUnlocked = new Set<string>(a ? JSON.parse(a) : []);
+        const loadedUnlockedSet = new Set<string>(loadedUnlocked);
         setSessions(loadedSessions);
-        setUnlockedIds(loadedUnlocked);
-        if (p) setCustomPresets(JSON.parse(p));
-        if (active) {
-          const parsed: PersistedActiveSession = JSON.parse(active);
-          const restored = restoreActiveSession(parsed);
+        setUnlockedIds(loadedUnlockedSet);
+        setCustomPresets(loadedPresets);
+        if (parsedActive) {
+          const restored = restoreActiveSession(parsedActive);
           if (restored) {
             setCurrentSession(restored);
             restoredSessionRef.current = !restored.paused;
-          } else if (isExpiredActiveSession(parsed)) {
-            const expiredSession = { ...parsed, remainingMs: 0 };
-            const record = createSessionRecord(expiredSession, true, parsed.endsAt ?? Date.now());
+          } else if (isExpiredActiveSession(parsedActive)) {
+            const expiredSession = { ...parsedActive, remainingMs: 0 };
+            const record = createSessionRecord(expiredSession, true, parsedActive.endsAt ?? Date.now());
             const next = record ? [record, ...loadedSessions] : loadedSessions;
             setSessions(next);
             await saveSessions(next);
-            await checkAchievements(next, loadedUnlocked);
-            await AsyncStorage.removeItem(ACTIVE_SESSION_KEY);
+            await checkAchievements(next, loadedUnlockedSet);
+            await removeStorageItem(ACTIVE_SESSION_KEY);
             await endStrictSession();
           } else {
-            await AsyncStorage.removeItem(ACTIVE_SESSION_KEY);
+            await removeStorageItem(ACTIVE_SESSION_KEY);
             await endStrictSession();
           }
         }
@@ -537,10 +552,10 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   }, [currentSession, saveActiveSession]);
 
   const addCustomPreset = useCallback((preset: Omit<CustomPreset, "id">) => {
-    const np: CustomPreset = { ...preset, id: `cp_${Date.now()}` };
+    const np: CustomPreset = { ...preset, id: `cp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` };
     setCustomPresets((prev) => {
       const n = [...prev, np];
-      try { AsyncStorage.setItem(PRESETS_KEY, JSON.stringify(n)); } catch {}
+      setJson(PRESETS_KEY, n);
       return n;
     });
   }, []);
@@ -548,7 +563,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const removeCustomPreset = useCallback((id: string) => {
     setCustomPresets((prev) => {
       const n = prev.filter((p) => p.id !== id);
-      try { AsyncStorage.setItem(PRESETS_KEY, JSON.stringify(n)); } catch {}
+      setJson(PRESETS_KEY, n);
       return n;
     });
   }, []);
@@ -556,7 +571,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const updateCustomPreset = useCallback((id: string, data: Partial<CustomPreset>) => {
     setCustomPresets((prev) => {
       const n = prev.map((p) => p.id === id ? { ...p, ...data } : p);
-      try { AsyncStorage.setItem(PRESETS_KEY, JSON.stringify(n)); } catch {}
+      setJson(PRESETS_KEY, n);
       return n;
     });
   }, []);
