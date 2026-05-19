@@ -99,6 +99,9 @@ const MANUAL_STRICT_DURATION_MS = 90 * 60 * 1000;
 const SUSPENSION_RISK_MS = 2 * 60 * 1000;
 const MIN_STRICT_DURATION_MS = 60 * 1000;
 const MAX_STRICT_DURATION_MS = 24 * 60 * 60 * 1000;
+const MAX_NAME_LENGTH = 60;
+const MAX_RULE_LENGTH = 120;
+const MAX_TIMETABLE_SLOTS = 200;
 
 interface UsageContextValue {
   apps: AppEntry[];
@@ -151,6 +154,62 @@ function timeToMinutes(value: string) {
   const [h, m] = value.split(":").map((n) => Number(n));
   if (Number.isNaN(h) || Number.isNaN(m)) return 0;
   return Math.min(1439, Math.max(0, h * 60 + m));
+}
+
+function cleanName(value: unknown, fallback = "Untitled") {
+  const raw = typeof value === "string" ? value : "";
+  const cleaned = raw.trim().replace(/\s+/g, " ").slice(0, MAX_NAME_LENGTH);
+  return cleaned || fallback;
+}
+
+function normalizeTime(value: unknown, fallback: string) {
+  if (typeof value !== "string") return fallback;
+  if (!/^\d{2}:\d{2}$/.test(value)) return fallback;
+  const [h, m] = value.split(":").map((n) => Number(n));
+  if (h < 0 || h > 23 || m < 0 || m > 59) return fallback;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function sanitizeBlockConfig(config: AppBlockConfig): AppBlockConfig {
+  const defaults = DEFAULT_BLOCK_CONFIG();
+  const rawTriggers = Array.isArray(config.triggers) ? config.triggers : defaults.triggers;
+  const rawDays = Array.isArray(config.days) ? config.days : defaults.days;
+  const triggers = rawTriggers.filter((trigger, index, all) => trigger in TRIGGER_META && all.indexOf(trigger) === index);
+  const days = rawDays.filter((day, index, all) => Number.isInteger(day) && day >= 0 && day <= 6 && all.indexOf(day) === index);
+  const dailyLimitMin = typeof config.dailyLimitMin === "number" ? config.dailyLimitMin : defaults.dailyLimitMin;
+  return {
+    ...defaults,
+    ...config,
+    triggers,
+    startTime: normalizeTime(config.startTime, defaults.startTime),
+    endTime: normalizeTime(config.endTime, defaults.endTime),
+    days: days.length > 0 ? days : defaults.days,
+    dailyLimitMin: Math.min(24 * 60, Math.max(1, Math.round(dailyLimitMin))),
+  };
+}
+
+function sanitizeRuleValue(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value.trim().replace(/\s+/g, " ").slice(0, MAX_RULE_LENGTH);
+}
+
+function sanitizeAppEntry(app: AppEntry): AppEntry {
+  return {
+    ...app,
+    name: cleanName(app.name, "App"),
+    blockConfig: sanitizeBlockConfig(app.blockConfig ?? DEFAULT_BLOCK_CONFIG()),
+  };
+}
+
+function sanitizeTimetableSlot(slot: TimetableSlot): TimetableSlot {
+  return {
+    ...slot,
+    id: typeof slot.id === "string" ? slot.id : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    dayOfWeek: Number.isInteger(slot.dayOfWeek) && slot.dayOfWeek >= 0 && slot.dayOfWeek <= 6 ? slot.dayOfWeek : 1,
+    startTime: normalizeTime(slot.startTime, "09:00"),
+    endTime: normalizeTime(slot.endTime, "10:00"),
+    label: cleanName(slot.label, "Focus Block"),
+  };
 }
 
 function toRanges(startTime: string, endTime: string) {
@@ -219,10 +278,10 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
           getJson<StrictModeSession | null>(STRICT_SESSION_KEY, null, (value): value is StrictModeSession | null => value === null || isStrictModeSession(value)),
           getJson<StrictReliabilityState | null>(STRICT_RELIABILITY_KEY, null, (value): value is StrictReliabilityState | null => value === null || isRecord(value)),
         ]);
-        setApps(storedApps);
-        setBlockRules(storedRules);
-        setWhitelist(storedWhitelist);
-        setTimetable(storedTimetable);
+        setApps(storedApps.filter(isRecord).map((app) => sanitizeAppEntry(app as unknown as AppEntry)));
+        setBlockRules(storedRules.filter((rule) => isRecord(rule) && sanitizeRuleValue(rule.value)).map((rule) => ({ ...rule, value: sanitizeRuleValue(rule.value) } as BlockRule)));
+        setWhitelist(storedWhitelist.filter(isRecord).map((entry) => ({ ...entry, name: cleanName(entry.name, "App") } as WhitelistEntry)));
+        setTimetable(storedTimetable.filter(isRecord).map((slot) => sanitizeTimetableSlot(slot as unknown as TimetableSlot)).slice(0, MAX_TIMETABLE_SLOTS));
         setDistractionLog(storedDistractions.slice(0, MAX_LOG_ENTRIES));
         if (typeof settings.lockMode === "boolean") setLockModeEnabled(settings.lockMode);
         if (isRecord(settings.emergencyUnlock) && typeof settings.emergencyUnlock.unlockedAt === "number") {
@@ -277,9 +336,10 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addApp = useCallback((app: AppEntry) => {
+    const item = sanitizeAppEntry(app);
     setApps((prev) => {
-      if (prev.some((a) => a.name === app.name)) return prev;
-      const next = [...prev, app];
+      if (prev.some((a) => a.name.toLowerCase() === item.name.toLowerCase())) return prev;
+      const next = [...prev, item];
       save(APPS_KEY, next);
       return next;
     });
@@ -304,15 +364,18 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   }, [save]);
   const updateAppConfig = useCallback((name: string, config: Partial<AppBlockConfig>) => {
     setApps((prev) => {
-      const next = prev.map((a) => a.name === name ? { ...a, blockConfig: { ...a.blockConfig, ...config } } : a);
+      const next = prev.map((a) => a.name === name ? { ...a, blockConfig: sanitizeBlockConfig({ ...a.blockConfig, ...config }) } : a);
       save(APPS_KEY, next);
       return next;
     });
   }, [save]);
 
   const addBlockRule = useCallback((rule: Omit<BlockRule, "id">) => {
-    const item: BlockRule = { ...rule, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
+    const value = sanitizeRuleValue(rule.value);
+    if (!value) return;
+    const item: BlockRule = { ...rule, value, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
     setBlockRules((prev) => {
+      if (prev.some((r) => r.type === item.type && r.value.toLowerCase() === value.toLowerCase())) return prev;
       const next = [...prev, item];
       save(RULES_KEY, next);
       return next;
@@ -334,9 +397,10 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   }, [save]);
 
   const addToWhitelist = useCallback((entry: WhitelistEntry) => {
+    const item = { ...entry, name: cleanName(entry.name, "App") };
     setWhitelist((prev) => {
-      if (prev.some((w) => w.name === entry.name)) return prev;
-      const next = [...prev, entry];
+      if (prev.some((w) => w.name.toLowerCase() === item.name.toLowerCase())) return prev;
+      const next = [...prev, item];
       save(WHITELIST_KEY, next);
       return next;
     });
@@ -350,9 +414,9 @@ export function UsageProvider({ children }: { children: React.ReactNode }) {
   }, [save]);
 
   const addTimetableSlot = useCallback((slot: Omit<TimetableSlot, "id">) => {
-    const item: TimetableSlot = { ...slot, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
+    const item: TimetableSlot = sanitizeTimetableSlot({ ...slot, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
     setTimetable((prev) => {
-      const next = [...prev.filter((existing) => !overlaps(existing, item)), item];
+      const next = [...prev.filter((existing) => !overlaps(existing, item)), item].slice(-MAX_TIMETABLE_SLOTS);
       save(TIMETABLE_KEY, next);
       return next;
     });
