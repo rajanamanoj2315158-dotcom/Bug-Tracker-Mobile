@@ -7,6 +7,7 @@ import React, {
   useState,
 } from "react";
 import { AppState } from "react-native";
+import type { StartSessionParams } from "@/context/UsageContext";
 import { useUsage } from "@/context/UsageContext";
 import { getJson, isArray, isRecord, removeStorageItem, setJson } from "@/lib/storage";
 
@@ -67,6 +68,7 @@ export interface ActiveSession {
   customBreakMs?: number;
   timerMode?: TimerMode;
   autoRepeat?: boolean;
+  strictLockActive?: boolean;
 }
 
 export interface Achievement {
@@ -175,6 +177,14 @@ function createSessionRecord(session: ActiveSession, completed: boolean, endedAt
     completed,
     pomodoroSessions: session.pomodoroState?.completedCycles,
     customPresetName: session.customPresetName,
+  };
+}
+
+function getStrictSessionParams(session: ActiveSession): StartSessionParams {
+  return {
+    durationMs: session.durationMs,
+    mode: session.mode === "deep" ? "deep_work" : session.timerMode === "pomodoro" ? "pomodoro" : "custom",
+    blockedApp: session.customPresetName ?? session.mode,
   };
 }
 
@@ -307,10 +317,10 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
             await saveSessions(next);
             await checkAchievements(next, loadedUnlockedSet);
             await removeStorageItem(ACTIVE_SESSION_KEY);
-            await endStrictSession();
+            if (parsedActive.strictLockActive) await endStrictSession();
           } else {
             await removeStorageItem(ACTIVE_SESSION_KEY);
-            await endStrictSession();
+            if (parsedActive.strictLockActive) await endStrictSession();
           }
         }
       } catch {}
@@ -330,6 +340,20 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     await saveSessions(next);
     return next;
   }, [saveSessions]);
+
+  const finishExistingSession = useCallback((session: ActiveSession | null) => {
+    if (!session) return;
+    setSessions((allSessions) => {
+      commitSession(session, false, allSessions).then((next) => {
+        setSessions(next);
+        checkAchievements(next, unlockedIds);
+      });
+      return allSessions;
+    });
+    if (session.strictLockActive) {
+      endStrictSession();
+    }
+  }, [checkAchievements, commitSession, endStrictSession, unlockedIds]);
 
   const startTick = useCallback(() => {
     stopTick();
@@ -410,7 +434,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
               endsAt: Date.now() + nextMs,
               pomodoroState: {
                 cycle: (prev.pomodoroState?.cycle ?? 1) + 1,
-                completedCycles: prev.pomodoroState?.completedCycles ?? 0,
+                completedCycles: (prev.pomodoroState?.completedCycles ?? 0) + (isWork ? 1 : 0),
                 phase: isWork ? "short_break" : "work",
               },
             };
@@ -419,12 +443,35 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
             return updated;
           }
 
+          if (prev.autoRepeat) {
+            const restarted: ActiveSession = {
+              ...prev,
+              startedAt: now,
+              endsAt: now + prev.durationMs,
+              remainingMs: prev.durationMs,
+              paused: false,
+            };
+            setSessions((allSessions) => {
+              commitSession(prev, true, allSessions).then((next) => {
+                setSessions(next);
+                checkAchievements(next, unlockedIds);
+              });
+              return allSessions;
+            });
+            saveActiveSession(restarted);
+            if (restarted.strictLockActive) {
+              startStrictSession(getStrictSessionParams(restarted));
+            }
+            setTimeout(() => startTick(), 100);
+            return restarted;
+          }
+
           setSessions((allSessions) => {
             commitSession(prev, true, allSessions).then((next) => {
               setSessions(next);
               checkAchievements(next, unlockedIds);
               saveActiveSession(null);
-              endStrictSession();
+              if (prev.strictLockActive) endStrictSession();
             });
             return allSessions;
           });
@@ -434,39 +481,46 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, remainingMs: remaining };
       });
     }, 500);
-  }, [stopTick, commitSession, checkAchievements, unlockedIds, saveActiveSession, endStrictSession]);
+  }, [stopTick, commitSession, checkAchievements, unlockedIds, saveActiveSession, startStrictSession, endStrictSession]);
 
   const startSession = useCallback((mode: SessionMode) => {
     stopTick();
     const durationMs = MODE_DURATIONS[mode];
+    const startedAt = Date.now();
+    const strictLockActive = mode === "deep" || mode === "monk" || mode === "detox" || mode === "founder";
     const session: ActiveSession = {
       mode,
       durationMs,
-      startedAt: Date.now(),
-      endsAt: Date.now() + durationMs,
+      startedAt,
+      endsAt: startedAt + durationMs,
       remainingMs: durationMs,
       paused: false,
       timerMode: mode === "pomodoro" ? "pomodoro" : "countdown",
       pomodoroState: mode === "pomodoro" ? { cycle: 1, phase: "work", completedCycles: 0 } : undefined,
+      strictLockActive,
     };
-    setCurrentSession(session);
+    setCurrentSession((prev) => {
+      finishExistingSession(prev);
+      return session;
+    });
     saveActiveSession(session);
-    if (mode === "deep" || mode === "monk" || mode === "detox" || mode === "founder") {
-      startStrictSession({ durationMs, mode: mode === "deep" ? "deep_work" : "custom", blockedApp: mode });
+    if (session.strictLockActive) {
+      startStrictSession(getStrictSessionParams(session));
     }
     setTimeout(() => startTick(), 50);
-  }, [stopTick, startTick, startStrictSession, saveActiveSession]);
+  }, [stopTick, finishExistingSession, saveActiveSession, startStrictSession, startTick]);
 
   const startCustomSession = useCallback((preset: CustomPreset) => {
     stopTick();
     const workMs = preset.durationMin * 60000;
     const breakMs = preset.breakMin * 60000;
     const isPomodoro = preset.timerMode === "pomodoro" || preset.timerMode === "interval";
+    const startedAt = Date.now();
     const session: ActiveSession = {
       mode: "custom",
       durationMs: workMs,
-      startedAt: Date.now(),
-      endsAt: preset.timerMode === "stopwatch" ? undefined : Date.now() + workMs,
+      startedAt,
+      endsAt: preset.timerMode === "stopwatch" ? undefined : startedAt + workMs,
       remainingMs: preset.timerMode === "stopwatch" ? 0 : workMs,
       paused: false,
       timerMode: preset.timerMode,
@@ -477,14 +531,18 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       customBreakMs: breakMs,
       autoRepeat: preset.autoRepeat,
       pomodoroState: isPomodoro ? { cycle: 1, phase: "work", completedCycles: 0 } : undefined,
+      strictLockActive: preset.strictMode,
     };
-    setCurrentSession(session);
+    setCurrentSession((prev) => {
+      finishExistingSession(prev);
+      return session;
+    });
     saveActiveSession(session);
-    if (preset.strictMode) {
-      startStrictSession({ durationMs: workMs, mode: preset.timerMode === "pomodoro" ? "pomodoro" : "custom", blockedApp: preset.name });
+    if (session.strictLockActive) {
+      startStrictSession(getStrictSessionParams(session));
     }
     setTimeout(() => startTick(), 50);
-  }, [stopTick, startTick, startStrictSession, saveActiveSession]);
+  }, [stopTick, finishExistingSession, saveActiveSession, startStrictSession, startTick]);
 
   const stopSession = useCallback(() => {
     stopTick();
@@ -495,7 +553,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
           setSessions(next);
           checkAchievements(next, unlockedIds);
           saveActiveSession(null);
-          endStrictSession();
+          if (prev.strictLockActive) endStrictSession();
         });
         return allSessions;
       });
