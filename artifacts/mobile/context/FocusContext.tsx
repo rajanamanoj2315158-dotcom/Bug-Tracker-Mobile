@@ -9,7 +9,13 @@ import React, {
 import { AppState } from "react-native";
 import type { StartSessionParams } from "@/context/UsageContext";
 import { useUsage } from "@/context/UsageContext";
-import { getJson, isArray, isRecord, removeStorageItem, setJson } from "@/lib/storage";
+import {
+  getJson,
+  isArray,
+  isRecord,
+  removeStorageItem,
+  setJson,
+} from "@/lib/storage";
 
 export type SessionMode =
   | "pomodoro"
@@ -94,28 +100,159 @@ const MODE_DURATIONS: Record<SessionMode, number> = {
 };
 
 const ALL_ACHIEVEMENTS: Achievement[] = [
-  { id: "first_session", title: "First Step", desc: "Complete your first focus session", icon: "award" },
-  { id: "streak_3", title: "Consistent", desc: "3-day focus streak", icon: "zap" },
-  { id: "streak_7", title: "One Week", desc: "7-day focus streak", icon: "star" },
-  { id: "streak_30", title: "Iron Will", desc: "30-day focus streak", icon: "shield" },
-  { id: "deep_work_1", title: "Deep Diver", desc: "Complete a deep work session", icon: "anchor" },
-  { id: "monk_1", title: "Monk Mind", desc: "Complete a monk mode session", icon: "moon" },
-  { id: "founder_1", title: "Founder", desc: "Complete a founder mode session", icon: "briefcase" },
-  { id: "total_10h", title: "10 Hours", desc: "Accumulate 10 hours of focus", icon: "clock" },
-  { id: "total_50h", title: "50 Hours", desc: "Accumulate 50 hours of focus", icon: "trending-up" },
-  { id: "pomodoro_4", title: "Tomato Farmer", desc: "Complete 4 pomodoro cycles", icon: "repeat" },
-  { id: "perfect_day", title: "Perfect Day", desc: "Reach 100 productivity score", icon: "sun" },
-  { id: "detox_1", title: "Digital Detox", desc: "Complete a dopamine detox session", icon: "x-circle" },
-  { id: "custom_1", title: "Architect", desc: "Create and complete a custom session", icon: "settings" },
+  {
+    id: "first_session",
+    title: "First Step",
+    desc: "Complete your first focus session",
+    icon: "award",
+  },
+  {
+    id: "streak_3",
+    title: "Consistent",
+    desc: "3-day focus streak",
+    icon: "zap",
+  },
+  {
+    id: "streak_7",
+    title: "One Week",
+    desc: "7-day focus streak",
+    icon: "star",
+  },
+  {
+    id: "streak_30",
+    title: "Iron Will",
+    desc: "30-day focus streak",
+    icon: "shield",
+  },
+  {
+    id: "deep_work_1",
+    title: "Deep Diver",
+    desc: "Complete a deep work session",
+    icon: "anchor",
+  },
+  {
+    id: "monk_1",
+    title: "Monk Mind",
+    desc: "Complete a monk mode session",
+    icon: "moon",
+  },
+  {
+    id: "founder_1",
+    title: "Founder",
+    desc: "Complete a founder mode session",
+    icon: "briefcase",
+  },
+  {
+    id: "total_10h",
+    title: "10 Hours",
+    desc: "Accumulate 10 hours of focus",
+    icon: "clock",
+  },
+  {
+    id: "total_50h",
+    title: "50 Hours",
+    desc: "Accumulate 50 hours of focus",
+    icon: "trending-up",
+  },
+  {
+    id: "pomodoro_4",
+    title: "Tomato Farmer",
+    desc: "Complete 4 pomodoro cycles",
+    icon: "repeat",
+  },
+  {
+    id: "perfect_day",
+    title: "Perfect Day",
+    desc: "Reach 100 productivity score",
+    icon: "sun",
+  },
+  {
+    id: "detox_1",
+    title: "Digital Detox",
+    desc: "Complete a dopamine detox session",
+    icon: "x-circle",
+  },
+  {
+    id: "custom_1",
+    title: "Architect",
+    desc: "Create and complete a custom session",
+    icon: "settings",
+  },
 ];
 
 const DEFAULT_CUSTOM_PRESETS: CustomPreset[] = [
-  { id: "study_45", name: "Study Session", icon: "book-open", color: "#38bdf8", durationMin: 45, breakMin: 10, timerMode: "countdown", strictMode: false, autoRepeat: false, ambientSound: "rain" },
-  { id: "coding_120", name: "Coding Sprint", icon: "code", color: "#6366f1", durationMin: 120, breakMin: 15, timerMode: "countdown", strictMode: true, autoRepeat: false, ambientSound: "white" },
-  { id: "exam_180", name: "Exam Lockdown", icon: "alert-circle", color: "#ef4444", durationMin: 180, breakMin: 0, timerMode: "countdown", strictMode: true, autoRepeat: false, ambientSound: "none" },
-  { id: "reading_30", name: "Reading Mode", icon: "book", color: "#22c55e", durationMin: 30, breakMin: 5, timerMode: "pomodoro", strictMode: false, autoRepeat: true, ambientSound: "forest" },
-  { id: "deep_work_marathon", name: "Marathon Focus", icon: "zap", color: "#f97316", durationMin: 240, breakMin: 20, timerMode: "interval", strictMode: true, autoRepeat: false, ambientSound: "white" },
-  { id: "detox_6h", name: "Digital Detox", icon: "x-circle", color: "#ec4899", durationMin: 360, breakMin: 0, timerMode: "countdown", strictMode: true, autoRepeat: false, ambientSound: "none" },
+  {
+    id: "study_45",
+    name: "Study Session",
+    icon: "book-open",
+    color: "#38bdf8",
+    durationMin: 45,
+    breakMin: 10,
+    timerMode: "countdown",
+    strictMode: false,
+    autoRepeat: false,
+    ambientSound: "rain",
+  },
+  {
+    id: "coding_120",
+    name: "Coding Sprint",
+    icon: "code",
+    color: "#6366f1",
+    durationMin: 120,
+    breakMin: 15,
+    timerMode: "countdown",
+    strictMode: true,
+    autoRepeat: false,
+    ambientSound: "white",
+  },
+  {
+    id: "exam_180",
+    name: "Exam Lockdown",
+    icon: "alert-circle",
+    color: "#ef4444",
+    durationMin: 180,
+    breakMin: 0,
+    timerMode: "countdown",
+    strictMode: true,
+    autoRepeat: false,
+    ambientSound: "none",
+  },
+  {
+    id: "reading_30",
+    name: "Reading Mode",
+    icon: "book",
+    color: "#22c55e",
+    durationMin: 30,
+    breakMin: 5,
+    timerMode: "pomodoro",
+    strictMode: false,
+    autoRepeat: true,
+    ambientSound: "forest",
+  },
+  {
+    id: "deep_work_marathon",
+    name: "Marathon Focus",
+    icon: "zap",
+    color: "#f97316",
+    durationMin: 240,
+    breakMin: 20,
+    timerMode: "interval",
+    strictMode: true,
+    autoRepeat: false,
+    ambientSound: "white",
+  },
+  {
+    id: "detox_6h",
+    name: "Digital Detox",
+    icon: "x-circle",
+    color: "#ec4899",
+    durationMin: 360,
+    breakMin: 0,
+    timerMode: "countdown",
+    strictMode: true,
+    autoRepeat: false,
+    ambientSound: "none",
+  },
 ];
 
 function getDayKey(ts: number) {
@@ -125,7 +262,9 @@ function getDayKey(ts: number) {
 
 function getDayIndex(ts: number) {
   const d = new Date(ts);
-  return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000);
+  return Math.floor(
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000,
+  );
 }
 
 interface PersistedActiveSession extends ActiveSession {
@@ -133,17 +272,26 @@ interface PersistedActiveSession extends ActiveSession {
   savedAt?: number;
 }
 
-function restoreActiveSession(raw: PersistedActiveSession): ActiveSession | null {
-  if (typeof raw.startedAt !== "number" || typeof raw.durationMs !== "number") return null;
-  if (typeof raw.remainingMs !== "number" || typeof raw.paused !== "boolean") return null;
+function restoreActiveSession(
+  raw: PersistedActiveSession,
+): ActiveSession | null {
+  if (typeof raw.startedAt !== "number" || typeof raw.durationMs !== "number")
+    return null;
+  if (typeof raw.remainingMs !== "number" || typeof raw.paused !== "boolean")
+    return null;
   if (!Number.isFinite(raw.durationMs) || raw.durationMs < 0) return null;
   if (!Number.isFinite(raw.remainingMs) || raw.remainingMs < 0) return null;
 
   const now = Date.now();
 
   if (raw.timerMode === "stopwatch") {
-    const elapsedSinceSave = raw.paused ? 0 : Math.max(0, now - (raw.savedAt ?? now));
-    return { ...raw, remainingMs: Math.max(0, raw.remainingMs + elapsedSinceSave) };
+    const elapsedSinceSave = raw.paused
+      ? 0
+      : Math.max(0, now - (raw.savedAt ?? now));
+    return {
+      ...raw,
+      remainingMs: Math.max(0, raw.remainingMs + elapsedSinceSave),
+    };
   }
 
   const remainingMs = raw.paused
@@ -157,21 +305,35 @@ function restoreActiveSession(raw: PersistedActiveSession): ActiveSession | null
 }
 
 function isExpiredActiveSession(raw: PersistedActiveSession) {
-  const isOneShotTimer = raw.timerMode === undefined || raw.timerMode === "countdown";
-  return isOneShotTimer && !raw.paused && typeof raw.endsAt === "number" && raw.endsAt <= Date.now();
+  const isOneShotTimer =
+    raw.timerMode === undefined || raw.timerMode === "countdown";
+  return (
+    isOneShotTimer &&
+    !raw.paused &&
+    typeof raw.endsAt === "number" &&
+    raw.endsAt <= Date.now()
+  );
 }
 
-function createSessionRecord(session: ActiveSession, completed: boolean, endedAt = Date.now()): SessionRecord | null {
-  const elapsed = session.timerMode === "stopwatch"
-    ? Math.max(0, session.remainingMs)
-    : Math.max(0, session.durationMs - session.remainingMs);
+function createSessionRecord(
+  session: ActiveSession,
+  completed: boolean,
+  endedAt = Date.now(),
+): SessionRecord | null {
+  const elapsed =
+    session.timerMode === "stopwatch"
+      ? Math.max(0, session.remainingMs)
+      : Math.max(0, session.durationMs - session.remainingMs);
   if (elapsed < 10000 && !completed) return null;
 
   return {
     id: `${endedAt}-${Math.random().toString(36).slice(2, 8)}`,
     mode: session.mode,
     durationMs: session.durationMs,
-    completedMs: completed && session.timerMode !== "stopwatch" ? session.durationMs : elapsed,
+    completedMs:
+      completed && session.timerMode !== "stopwatch"
+        ? session.durationMs
+        : elapsed,
     startedAt: session.startedAt,
     endedAt,
     completed,
@@ -183,7 +345,12 @@ function createSessionRecord(session: ActiveSession, completed: boolean, endedAt
 function getStrictSessionParams(session: ActiveSession): StartSessionParams {
   return {
     durationMs: session.durationMs,
-    mode: session.mode === "deep" ? "deep_work" : session.timerMode === "pomodoro" ? "pomodoro" : "custom",
+    mode:
+      session.mode === "deep"
+        ? "deep_work"
+        : session.timerMode === "pomodoro"
+          ? "pomodoro"
+          : "custom",
     blockedApp: session.customPresetName ?? session.mode,
   };
 }
@@ -220,8 +387,15 @@ const ACHIEVEMENTS_KEY = "fs_achievements";
 const PRESETS_KEY = "fs_custom_presets_v1";
 const ACTIVE_SESSION_KEY = "fs_active_session_v2";
 const ACTIVE_SESSION_SCHEMA_VERSION = 2;
+const MAX_SESSION_RECORDS = 1000;
+const MAX_CUSTOM_PRESETS = 50;
+const MIN_CUSTOM_DURATION_MIN = 1;
+const MAX_CUSTOM_DURATION_MIN = 12 * 60;
+const MAX_CUSTOM_BREAK_MIN = 3 * 60;
 
-function isPersistedActiveSession(value: unknown): value is PersistedActiveSession {
+function isPersistedActiveSession(
+  value: unknown,
+): value is PersistedActiveSession {
   return (
     isRecord(value) &&
     typeof value.mode === "string" &&
@@ -233,14 +407,77 @@ function isPersistedActiveSession(value: unknown): value is PersistedActiveSessi
 }
 
 function asStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+  );
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function sanitizeCustomPreset(preset: Partial<CustomPreset>): CustomPreset {
+  const timerMode: TimerMode =
+    preset.timerMode === "pomodoro" ||
+    preset.timerMode === "stopwatch" ||
+    preset.timerMode === "interval"
+      ? preset.timerMode
+      : "countdown";
+
+  return {
+    id:
+      typeof preset.id === "string" && preset.id.trim()
+        ? preset.id
+        : `cp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name:
+      typeof preset.name === "string"
+        ? preset.name.trim().slice(0, 32) || "Focus Timer"
+        : "Focus Timer",
+    icon: typeof preset.icon === "string" ? preset.icon : "clock",
+    color: typeof preset.color === "string" ? preset.color : "#38bdf8",
+    durationMin: clampNumber(
+      typeof preset.durationMin === "number" ? preset.durationMin : 45,
+      MIN_CUSTOM_DURATION_MIN,
+      MAX_CUSTOM_DURATION_MIN,
+    ),
+    breakMin: clampNumber(
+      typeof preset.breakMin === "number" ? preset.breakMin : 0,
+      0,
+      MAX_CUSTOM_BREAK_MIN,
+    ),
+    timerMode,
+    strictMode: preset.strictMode === true,
+    autoRepeat: preset.autoRepeat === true,
+    ambientSound:
+      typeof preset.ambientSound === "string" ? preset.ambientSound : "none",
+  };
+}
+
+function sanitizeSessionRecords(records: SessionRecord[]): SessionRecord[] {
+  return records
+    .filter(
+      (record) =>
+        typeof record === "object" &&
+        record !== null &&
+        typeof record.id === "string" &&
+        typeof record.startedAt === "number" &&
+        typeof record.endedAt === "number" &&
+        typeof record.completedMs === "number" &&
+        record.completedMs >= 0,
+    )
+    .slice(0, MAX_SESSION_RECORDS);
 }
 
 export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
-  const [currentSession, setCurrentSession] = useState<ActiveSession | null>(null);
-  const [customPresets, setCustomPresets] = useState<CustomPreset[]>(DEFAULT_CUSTOM_PRESETS);
+  const [currentSession, setCurrentSession] = useState<ActiveSession | null>(
+    null,
+  );
+  const [customPresets, setCustomPresets] = useState<CustomPreset[]>(
+    DEFAULT_CUSTOM_PRESETS,
+  );
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastTickRef = useRef<number>(Date.now());
   const restoredSessionRef = useRef(false);
@@ -248,45 +485,63 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const { startStrictSession, endStrictSession } = useUsage();
 
   const saveSessions = useCallback(async (s: SessionRecord[]) => {
-    await setJson(SESSIONS_KEY, s);
+    await setJson(SESSIONS_KEY, sanitizeSessionRecords(s));
   }, []);
 
-  const saveActiveSession = useCallback(async (session: ActiveSession | null) => {
-    if (!session) {
-      await removeStorageItem(ACTIVE_SESSION_KEY);
-      return;
-    }
+  const saveActiveSession = useCallback(
+    async (session: ActiveSession | null) => {
+      if (!session) {
+        await removeStorageItem(ACTIVE_SESSION_KEY);
+        return;
+      }
 
-    const persisted: PersistedActiveSession = {
-      ...session,
-      schemaVersion: ACTIVE_SESSION_SCHEMA_VERSION,
-      savedAt: Date.now(),
-    };
-    await setJson(ACTIVE_SESSION_KEY, persisted);
-  }, []);
+      const persisted: PersistedActiveSession = {
+        ...session,
+        schemaVersion: ACTIVE_SESSION_SCHEMA_VERSION,
+        savedAt: Date.now(),
+      };
+      await setJson(ACTIVE_SESSION_KEY, persisted);
+    },
+    [],
+  );
 
-  const unlockAchievement = useCallback(async (id: string, prev: Set<string>) => {
-    if (prev.has(id)) return prev;
-    const next = new Set(prev).add(id);
-    await setJson(ACHIEVEMENTS_KEY, [...next]);
-    return next;
-  }, []);
+  const unlockAchievement = useCallback(
+    async (id: string, prev: Set<string>) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev).add(id);
+      await setJson(ACHIEVEMENTS_KEY, [...next]);
+      return next;
+    },
+    [],
+  );
 
-  const checkAchievements = useCallback(async (allSessions: SessionRecord[], currentUnlocked: Set<string>) => {
-    let unlocked = currentUnlocked;
-    const totalMs = allSessions.reduce((a, s) => a + s.completedMs, 0);
-    const completed = allSessions.filter((s) => s.completed);
-    if (completed.length >= 1) unlocked = await unlockAchievement("first_session", unlocked);
-    if (totalMs >= 10 * 3600000) unlocked = await unlockAchievement("total_10h", unlocked);
-    if (totalMs >= 50 * 3600000) unlocked = await unlockAchievement("total_50h", unlocked);
-    if (completed.some((s) => s.mode === "deep")) unlocked = await unlockAchievement("deep_work_1", unlocked);
-    if (completed.some((s) => s.mode === "monk")) unlocked = await unlockAchievement("monk_1", unlocked);
-    if (completed.some((s) => s.mode === "founder")) unlocked = await unlockAchievement("founder_1", unlocked);
-    if (completed.some((s) => s.mode === "detox")) unlocked = await unlockAchievement("detox_1", unlocked);
-    if (completed.some((s) => s.mode === "custom")) unlocked = await unlockAchievement("custom_1", unlocked);
-    if (completed.some((s) => (s.pomodoroSessions ?? 0) >= 4)) unlocked = await unlockAchievement("pomodoro_4", unlocked);
-    setUnlockedIds(unlocked);
-  }, [unlockAchievement]);
+  const checkAchievements = useCallback(
+    async (allSessions: SessionRecord[], currentUnlocked: Set<string>) => {
+      let unlocked = currentUnlocked;
+      const totalMs = allSessions.reduce((a, s) => a + s.completedMs, 0);
+      const completed = allSessions.filter((s) => s.completed);
+      if (completed.length >= 1)
+        unlocked = await unlockAchievement("first_session", unlocked);
+      if (totalMs >= 10 * 3600000)
+        unlocked = await unlockAchievement("total_10h", unlocked);
+      if (totalMs >= 50 * 3600000)
+        unlocked = await unlockAchievement("total_50h", unlocked);
+      if (completed.some((s) => s.mode === "deep"))
+        unlocked = await unlockAchievement("deep_work_1", unlocked);
+      if (completed.some((s) => s.mode === "monk"))
+        unlocked = await unlockAchievement("monk_1", unlocked);
+      if (completed.some((s) => s.mode === "founder"))
+        unlocked = await unlockAchievement("founder_1", unlocked);
+      if (completed.some((s) => s.mode === "detox"))
+        unlocked = await unlockAchievement("detox_1", unlocked);
+      if (completed.some((s) => s.mode === "custom"))
+        unlocked = await unlockAchievement("custom_1", unlocked);
+      if (completed.some((s) => (s.pomodoroSessions ?? 0) >= 4))
+        unlocked = await unlockAchievement("pomodoro_4", unlocked);
+      setUnlockedIds(unlocked);
+    },
+    [unlockAchievement],
+  );
 
   useEffect(() => {
     if (didHydrateRef.current) return;
@@ -294,16 +549,38 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
 
     (async () => {
       try {
-        const [loadedSessions, loadedUnlocked, loadedPresets, parsedActive] = await Promise.all([
-          getJson<SessionRecord[]>(SESSIONS_KEY, [], isArray as (value: unknown) => value is SessionRecord[]),
-          getJson<string[]>(ACHIEVEMENTS_KEY, [], asStringArray),
-          getJson<CustomPreset[]>(PRESETS_KEY, DEFAULT_CUSTOM_PRESETS, isArray as (value: unknown) => value is CustomPreset[]),
-          getJson<PersistedActiveSession | null>(ACTIVE_SESSION_KEY, null, (value): value is PersistedActiveSession | null => value === null || isPersistedActiveSession(value)),
-        ]);
+        const [loadedSessions, loadedUnlocked, loadedPresets, parsedActive] =
+          await Promise.all([
+            getJson<SessionRecord[]>(
+              SESSIONS_KEY,
+              [],
+              isArray as (value: unknown) => value is SessionRecord[],
+            ),
+            getJson<string[]>(ACHIEVEMENTS_KEY, [], asStringArray),
+            getJson<CustomPreset[]>(
+              PRESETS_KEY,
+              DEFAULT_CUSTOM_PRESETS,
+              isArray as (value: unknown) => value is CustomPreset[],
+            ),
+            getJson<PersistedActiveSession | null>(
+              ACTIVE_SESSION_KEY,
+              null,
+              (value): value is PersistedActiveSession | null =>
+                value === null || isPersistedActiveSession(value),
+            ),
+          ]);
+        const boundedSessions = sanitizeSessionRecords(loadedSessions);
+        const boundedPresets = loadedPresets
+          .map(sanitizeCustomPreset)
+          .slice(0, MAX_CUSTOM_PRESETS);
         const loadedUnlockedSet = new Set<string>(loadedUnlocked);
-        setSessions(loadedSessions);
+        setSessions(boundedSessions);
         setUnlockedIds(loadedUnlockedSet);
-        setCustomPresets(loadedPresets);
+        setCustomPresets(boundedPresets);
+        if (boundedSessions.length !== loadedSessions.length)
+          await saveSessions(boundedSessions);
+        if (boundedPresets.length !== loadedPresets.length)
+          await setJson(PRESETS_KEY, boundedPresets);
         if (parsedActive) {
           const restored = restoreActiveSession(parsedActive);
           if (restored) {
@@ -311,8 +588,14 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
             restoredSessionRef.current = !restored.paused;
           } else if (isExpiredActiveSession(parsedActive)) {
             const expiredSession = { ...parsedActive, remainingMs: 0 };
-            const record = createSessionRecord(expiredSession, true, parsedActive.endsAt ?? Date.now());
-            const next = record ? [record, ...loadedSessions] : loadedSessions;
+            const record = createSessionRecord(
+              expiredSession,
+              true,
+              parsedActive.endsAt ?? Date.now(),
+            );
+            const next = record
+              ? sanitizeSessionRecords([record, ...boundedSessions])
+              : boundedSessions;
             setSessions(next);
             await saveSessions(next);
             await checkAchievements(next, loadedUnlockedSet);
@@ -328,32 +611,45 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   }, [checkAchievements, endStrictSession, saveSessions]);
 
   const stopTick = useCallback(() => {
-    if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+    if (tickRef.current) {
+      clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
   }, []);
 
   useEffect(() => () => stopTick(), [stopTick]);
 
-  const commitSession = useCallback(async (session: ActiveSession, completed: boolean, allSessions: SessionRecord[]) => {
-    const record = createSessionRecord(session, completed);
-    if (!record) return allSessions;
-    const next = [record, ...allSessions];
-    await saveSessions(next);
-    return next;
-  }, [saveSessions]);
+  const commitSession = useCallback(
+    async (
+      session: ActiveSession,
+      completed: boolean,
+      allSessions: SessionRecord[],
+    ) => {
+      const record = createSessionRecord(session, completed);
+      if (!record) return allSessions;
+      const next = sanitizeSessionRecords([record, ...allSessions]);
+      await saveSessions(next);
+      return next;
+    },
+    [saveSessions],
+  );
 
-  const finishExistingSession = useCallback((session: ActiveSession | null) => {
-    if (!session) return;
-    setSessions((allSessions) => {
-      commitSession(session, false, allSessions).then((next) => {
-        setSessions(next);
-        checkAchievements(next, unlockedIds);
+  const finishExistingSession = useCallback(
+    (session: ActiveSession | null) => {
+      if (!session) return;
+      setSessions((allSessions) => {
+        commitSession(session, false, allSessions).then((next) => {
+          setSessions(next);
+          checkAchievements(next, unlockedIds);
+        });
+        return allSessions;
       });
-      return allSessions;
-    });
-    if (session.strictLockActive) {
-      endStrictSession();
-    }
-  }, [checkAchievements, commitSession, endStrictSession, unlockedIds]);
+      if (session.strictLockActive) {
+        endStrictSession();
+      }
+    },
+    [checkAchievements, commitSession, endStrictSession, unlockedIds],
+  );
 
   const startTick = useCallback(() => {
     stopTick();
@@ -382,7 +678,9 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
             const ps = prev.pomodoroState;
             const workMs = prev.customWorkMs ?? POMO_WORK_MS;
             const shortMs = prev.customBreakMs ?? POMO_SHORT_MS;
-            const longMs = prev.customBreakMs ? prev.customBreakMs * 3 : POMO_LONG_MS;
+            const longMs = prev.customBreakMs
+              ? prev.customBreakMs * 3
+              : POMO_LONG_MS;
 
             if (ps.phase === "work") {
               const newCycles = ps.completedCycles + 1;
@@ -392,13 +690,23 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
                 durationMs: isLong ? longMs : shortMs,
                 remainingMs: isLong ? longMs : shortMs,
                 endsAt: Date.now() + (isLong ? longMs : shortMs),
-                pomodoroState: { cycle: ps.cycle + 1, phase: isLong ? "long_break" : "short_break", completedCycles: newCycles },
+                pomodoroState: {
+                  cycle: ps.cycle + 1,
+                  phase: isLong ? "long_break" : "short_break",
+                  completedCycles: newCycles,
+                },
               };
               saveActiveSession(updated);
               setTimeout(() => startTick(), 100);
               return updated;
             } else {
-              const back: ActiveSession = { ...prev, durationMs: workMs, remainingMs: workMs, endsAt: Date.now() + workMs, pomodoroState: { ...ps, phase: "work" } };
+              const back: ActiveSession = {
+                ...prev,
+                durationMs: workMs,
+                remainingMs: workMs,
+                endsAt: Date.now() + workMs,
+                pomodoroState: { ...ps, phase: "work" },
+              };
               saveActiveSession(back);
               setTimeout(() => startTick(), 100);
               return back;
@@ -409,7 +717,9 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
           if (prev.timerMode === "interval") {
             const phase = prev.pomodoroState?.phase ?? "work";
             const isWork = phase === "work";
-            const nextMs = isWork ? (prev.customBreakMs ?? 0) : (prev.customWorkMs ?? POMO_WORK_MS);
+            const nextMs = isWork
+              ? (prev.customBreakMs ?? 0)
+              : (prev.customWorkMs ?? POMO_WORK_MS);
             if (nextMs <= 0) {
               const fallbackMs = prev.customWorkMs ?? POMO_WORK_MS;
               const updated: ActiveSession = {
@@ -434,7 +744,8 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
               endsAt: Date.now() + nextMs,
               pomodoroState: {
                 cycle: (prev.pomodoroState?.cycle ?? 1) + 1,
-                completedCycles: (prev.pomodoroState?.completedCycles ?? 0) + (isWork ? 1 : 0),
+                completedCycles:
+                  (prev.pomodoroState?.completedCycles ?? 0) + (isWork ? 1 : 0),
                 phase: isWork ? "short_break" : "work",
               },
             };
@@ -481,68 +792,105 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, remainingMs: remaining };
       });
     }, 500);
-  }, [stopTick, commitSession, checkAchievements, unlockedIds, saveActiveSession, startStrictSession, endStrictSession]);
+  }, [
+    stopTick,
+    commitSession,
+    checkAchievements,
+    unlockedIds,
+    saveActiveSession,
+    startStrictSession,
+    endStrictSession,
+  ]);
 
-  const startSession = useCallback((mode: SessionMode) => {
-    stopTick();
-    const durationMs = MODE_DURATIONS[mode];
-    const startedAt = Date.now();
-    const strictLockActive = mode === "deep" || mode === "monk" || mode === "detox" || mode === "founder";
-    const session: ActiveSession = {
-      mode,
-      durationMs,
-      startedAt,
-      endsAt: startedAt + durationMs,
-      remainingMs: durationMs,
-      paused: false,
-      timerMode: mode === "pomodoro" ? "pomodoro" : "countdown",
-      pomodoroState: mode === "pomodoro" ? { cycle: 1, phase: "work", completedCycles: 0 } : undefined,
-      strictLockActive,
-    };
-    setCurrentSession((prev) => {
-      finishExistingSession(prev);
-      return session;
-    });
-    saveActiveSession(session);
-    if (session.strictLockActive) {
-      startStrictSession(getStrictSessionParams(session));
-    }
-    setTimeout(() => startTick(), 50);
-  }, [stopTick, finishExistingSession, saveActiveSession, startStrictSession, startTick]);
+  const startSession = useCallback(
+    (mode: SessionMode) => {
+      stopTick();
+      const durationMs = MODE_DURATIONS[mode];
+      const startedAt = Date.now();
+      const strictLockActive =
+        mode === "deep" ||
+        mode === "monk" ||
+        mode === "detox" ||
+        mode === "founder";
+      const session: ActiveSession = {
+        mode,
+        durationMs,
+        startedAt,
+        endsAt: startedAt + durationMs,
+        remainingMs: durationMs,
+        paused: false,
+        timerMode: mode === "pomodoro" ? "pomodoro" : "countdown",
+        pomodoroState:
+          mode === "pomodoro"
+            ? { cycle: 1, phase: "work", completedCycles: 0 }
+            : undefined,
+        strictLockActive,
+      };
+      setCurrentSession((prev) => {
+        finishExistingSession(prev);
+        return session;
+      });
+      saveActiveSession(session);
+      if (session.strictLockActive) {
+        startStrictSession(getStrictSessionParams(session));
+      }
+      setTimeout(() => startTick(), 50);
+    },
+    [
+      stopTick,
+      finishExistingSession,
+      saveActiveSession,
+      startStrictSession,
+      startTick,
+    ],
+  );
 
-  const startCustomSession = useCallback((preset: CustomPreset) => {
-    stopTick();
-    const workMs = preset.durationMin * 60000;
-    const breakMs = preset.breakMin * 60000;
-    const isPomodoro = preset.timerMode === "pomodoro" || preset.timerMode === "interval";
-    const startedAt = Date.now();
-    const session: ActiveSession = {
-      mode: "custom",
-      durationMs: workMs,
-      startedAt,
-      endsAt: preset.timerMode === "stopwatch" ? undefined : startedAt + workMs,
-      remainingMs: preset.timerMode === "stopwatch" ? 0 : workMs,
-      paused: false,
-      timerMode: preset.timerMode,
-      customPresetId: preset.id,
-      customPresetName: preset.name,
-      customColor: preset.color,
-      customWorkMs: workMs,
-      customBreakMs: breakMs,
-      autoRepeat: preset.autoRepeat,
-      pomodoroState: isPomodoro ? { cycle: 1, phase: "work", completedCycles: 0 } : undefined,
-      strictLockActive: preset.strictMode,
-    };
-    setCurrentSession((prev) => {
-      finishExistingSession(prev);
-      return session;
-    });
-    saveActiveSession(session);
-    if (session.strictLockActive) {
-      startStrictSession(getStrictSessionParams(session));
-    }
-    setTimeout(() => startTick(), 50);
-  }, [stopTick, finishExistingSession, saveActiveSession, startStrictSession, startTick]);
+  const startCustomSession = useCallback(
+    (preset: CustomPreset) => {
+      stopTick();
+      const workMs = preset.durationMin * 60000;
+      const breakMs = preset.breakMin * 60000;
+      const isPomodoro =
+        preset.timerMode === "pomodoro" || preset.timerMode === "interval";
+      const startedAt = Date.now();
+      const session: ActiveSession = {
+        mode: "custom",
+        durationMs: workMs,
+        startedAt,
+        endsAt:
+          preset.timerMode === "stopwatch" ? undefined : startedAt + workMs,
+        remainingMs: preset.timerMode === "stopwatch" ? 0 : workMs,
+        paused: false,
+        timerMode: preset.timerMode,
+        customPresetId: preset.id,
+        customPresetName: preset.name,
+        customColor: preset.color,
+        customWorkMs: workMs,
+        customBreakMs: breakMs,
+        autoRepeat: preset.autoRepeat,
+        pomodoroState: isPomodoro
+          ? { cycle: 1, phase: "work", completedCycles: 0 }
+          : undefined,
+        strictLockActive: preset.strictMode,
+      };
+      setCurrentSession((prev) => {
+        finishExistingSession(prev);
+        return session;
+      });
+      saveActiveSession(session);
+      if (session.strictLockActive) {
+        startStrictSession(getStrictSessionParams(session));
+      }
+      setTimeout(() => startTick(), 50);
+    },
+    [
+      stopTick,
+      finishExistingSession,
+      saveActiveSession,
+      startStrictSession,
+      startTick,
+    ],
+  );
 
   const stopSession = useCallback(() => {
     stopTick();
@@ -559,7 +907,14 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       });
       return null;
     });
-  }, [stopTick, commitSession, checkAchievements, unlockedIds, saveActiveSession, endStrictSession]);
+  }, [
+    stopTick,
+    commitSession,
+    checkAchievements,
+    unlockedIds,
+    saveActiveSession,
+    endStrictSession,
+  ]);
 
   const pauseSession = useCallback(() => {
     stopTick();
@@ -575,7 +930,14 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     setCurrentSession((prev) => {
       if (!prev) return prev;
       setTimeout(() => startTick(), 50);
-      const updated = { ...prev, paused: false, endsAt: prev.timerMode === "stopwatch" ? undefined : Date.now() + prev.remainingMs };
+      const updated = {
+        ...prev,
+        paused: false,
+        endsAt:
+          prev.timerMode === "stopwatch"
+            ? undefined
+            : Date.now() + prev.remainingMs,
+      };
       saveActiveSession(updated);
       return updated;
     });
@@ -586,7 +948,13 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       if (!prev?.pomodoroState) return prev;
       if (prev.pomodoroState.phase === "work") return prev;
       const workMs = prev.customWorkMs ?? POMO_WORK_MS;
-      const updated: ActiveSession = { ...prev, durationMs: workMs, remainingMs: workMs, endsAt: Date.now() + workMs, pomodoroState: { ...prev.pomodoroState, phase: "work" } };
+      const updated: ActiveSession = {
+        ...prev,
+        durationMs: workMs,
+        remainingMs: workMs,
+        endsAt: Date.now() + workMs,
+        pomodoroState: { ...prev.pomodoroState, phase: "work" },
+      };
       saveActiveSession(updated);
       return updated;
     });
@@ -610,9 +978,15 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   }, [currentSession, saveActiveSession]);
 
   const addCustomPreset = useCallback((preset: Omit<CustomPreset, "id">) => {
-    const np: CustomPreset = { ...preset, id: `cp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` };
+    const np: CustomPreset = sanitizeCustomPreset({
+      ...preset,
+      id: `cp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    });
     setCustomPresets((prev) => {
-      const n = [...prev, np];
+      const n = [
+        np,
+        ...prev.filter((p) => p.name.toLowerCase() !== np.name.toLowerCase()),
+      ].slice(0, MAX_CUSTOM_PRESETS);
       setJson(PRESETS_KEY, n);
       return n;
     });
@@ -626,21 +1000,30 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const updateCustomPreset = useCallback((id: string, data: Partial<CustomPreset>) => {
-    setCustomPresets((prev) => {
-      const n = prev.map((p) => p.id === id ? { ...p, ...data } : p);
-      setJson(PRESETS_KEY, n);
-      return n;
-    });
-  }, []);
+  const updateCustomPreset = useCallback(
+    (id: string, data: Partial<CustomPreset>) => {
+      setCustomPresets((prev) => {
+        const n = prev.map((p) =>
+          p.id === id ? sanitizeCustomPreset({ ...p, ...data }) : p,
+        );
+        setJson(PRESETS_KEY, n);
+        return n;
+      });
+    },
+    [],
+  );
 
   const now = Date.now();
   const todayKey = getDayKey(now);
   const weekStart = now - 7 * 86400000;
 
-  const todaySessions = sessions.filter((s) => getDayKey(s.startedAt) === todayKey);
+  const todaySessions = sessions.filter(
+    (s) => getDayKey(s.startedAt) === todayKey,
+  );
   const todayFocusMs = todaySessions.reduce((a, s) => a + s.completedMs, 0);
-  const weekFocusMs = sessions.filter((s) => s.startedAt >= weekStart).reduce((a, s) => a + s.completedMs, 0);
+  const weekFocusMs = sessions
+    .filter((s) => s.startedAt >= weekStart)
+    .reduce((a, s) => a + s.completedMs, 0);
   const totalFocusMs = sessions.reduce((a, s) => a + s.completedMs, 0);
 
   const streak = (() => {
@@ -655,10 +1038,16 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   })();
 
   const bestStreak = (() => {
-    const sorted = [...new Set(sessions.map((s) => getDayIndex(s.startedAt)))].sort((a, b) => a - b);
-    let best = 0, cur = 0;
+    const sorted = [
+      ...new Set(sessions.map((s) => getDayIndex(s.startedAt))),
+    ].sort((a, b) => a - b);
+    let best = 0,
+      cur = 0;
     for (let i = 0; i < sorted.length; i++) {
-      if (i === 0) { cur = 1; continue; }
+      if (i === 0) {
+        cur = 1;
+        continue;
+      }
       if (sorted[i] - sorted[i - 1] === 1) cur++;
       else cur = 1;
       best = Math.max(best, cur);
@@ -667,11 +1056,14 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   })();
 
   const level = Math.floor(totalFocusMs / (3600000 * 10)) + 1;
-  const productivityScore = Math.min(100, Math.round(
-    Math.min(75, todaySessions.filter((s) => s.completed).length * 15) +
-    Math.min(15, streak * 1.5) +
-    Math.min(10, todaySessions.length * 2)
-  ));
+  const productivityScore = Math.min(
+    100,
+    Math.round(
+      Math.min(75, todaySessions.filter((s) => s.completed).length * 15) +
+        Math.min(15, streak * 1.5) +
+        Math.min(10, todaySessions.length * 2),
+    ),
+  );
 
   const achievements: Achievement[] = ALL_ACHIEVEMENTS.map((a) => ({
     ...a,
@@ -679,13 +1071,32 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   }));
 
   return (
-    <FocusContext.Provider value={{
-      sessions, currentSession, achievements, customPresets,
-      startSession, startCustomSession, stopSession, pauseSession, resumeSession, skipPomodoroBreak,
-      addCustomPreset, removeCustomPreset, updateCustomPreset,
-      todayFocusMs, weekFocusMs, totalFocusMs, streak, bestStreak,
-      totalSessions: sessions.length, level, productivityScore, todaySessions,
-    }}>
+    <FocusContext.Provider
+      value={{
+        sessions,
+        currentSession,
+        achievements,
+        customPresets,
+        startSession,
+        startCustomSession,
+        stopSession,
+        pauseSession,
+        resumeSession,
+        skipPomodoroBreak,
+        addCustomPreset,
+        removeCustomPreset,
+        updateCustomPreset,
+        todayFocusMs,
+        weekFocusMs,
+        totalFocusMs,
+        streak,
+        bestStreak,
+        totalSessions: sessions.length,
+        level,
+        productivityScore,
+        todaySessions,
+      }}
+    >
       {children}
     </FocusContext.Provider>
   );
